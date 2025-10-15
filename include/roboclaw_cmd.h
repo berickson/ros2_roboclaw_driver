@@ -11,16 +11,20 @@ class Cmd {
             RoboClaw::buffered_command_mutex_);  // Lock the mutex
         send();
         roboclaw_.debug_log_.showLog();
-        return;
       } catch (RoboClaw::TRoboClawException *e) {
         roboclaw_.debug_log_.showLog();
         RCUTILS_LOG_ERROR(
             "[RoboClaw::Cmd::execute] Exception: %s, retry number: %d",
             e->what(), retry);
+        continue;
       } catch (...) {
         roboclaw_.debug_log_.showLog();
         RCUTILS_LOG_ERROR("[RoboClaw::Cmd::execute] Uncaught exception !!!");
+        continue;
       }
+      // Mutex released here, now safe to call process() which may send other commands
+      process();
+      return;
     }
 
     roboclaw_.debug_log_.showLog();
@@ -30,6 +34,7 @@ class Cmd {
   }
 
   virtual void send() = 0;  // Declare send as a pure virtual function
+  virtual void process() {}  // Optional post-processing after mutex released
 
  protected:
   Cmd(RoboClaw &roboclaw, const char *name, const RoboClaw::kMotor motor)

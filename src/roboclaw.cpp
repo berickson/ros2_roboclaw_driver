@@ -51,7 +51,18 @@ RoboClaw::RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
       maxM2Current_(m2MaxCurrent),
       device_name_(device_name),
       portAddress_(128),
+      current_protection_state_(NORMAL),
+      filter_window_seconds_(1.0),
+      recovery_timeout_seconds_(5.0),
+      sensor_update_rate_(20.0),
+      m1_current_average_(0.0),
+      m2_current_average_(0.0),
+      max_buffer_size_(0),
       debug_log_(this) {
+  // Initialize timestamps - set last_nonzero_cmd_vel_time_ far in the past
+  // so recovery can start immediately after over-current
+  last_nonzero_cmd_vel_time_ = std::chrono::steady_clock::now() - std::chrono::hours(1);
+  
   openPort();
   RCUTILS_LOG_INFO("[RoboClaw::RoboClaw] RoboClaw software version: %s",
                    getVersion().c_str());
@@ -695,3 +706,114 @@ void RoboClaw::writeN2(bool sendCRC, uint8_t cnt, ...) {
 RoboClaw *RoboClaw::singleton() { return g_singleton; }
 
 RoboClaw *RoboClaw::g_singleton = nullptr;
+
+// Current protection methods implementation
+
+void RoboClaw::setCurrentProtectionParams(float filter_window_seconds,
+                                           float recovery_timeout_seconds,
+                                           float sensor_update_rate) {
+  // Validate parameters
+  filter_window_seconds_ = std::max(0.0f, std::min(10.0f, filter_window_seconds));
+  recovery_timeout_seconds_ = std::max(0.0f, std::min(60.0f, recovery_timeout_seconds));
+  sensor_update_rate_ = sensor_update_rate;
+  
+  updateBufferSize();
+  
+  RCUTILS_LOG_INFO("[RoboClaw::setCurrentProtectionParams] filter_window: %.2f, "
+                   "recovery_timeout: %.2f, sensor_rate: %.2f, max_buffer_size: %zu, "
+                   "maxM1Current: %.2f, maxM2Current: %.2f",
+                   filter_window_seconds_, recovery_timeout_seconds_, 
+                   sensor_update_rate_, max_buffer_size_,
+                   maxM1Current_, maxM2Current_);
+}
+
+void RoboClaw::notifyCmdVel(bool is_zero) {
+  if (!is_zero) {
+    // Track when non-zero cmd_vel is received
+    last_nonzero_cmd_vel_time_ = std::chrono::steady_clock::now();
+    
+    // If in recovery, abort and go back to warning
+    if (current_protection_state_ == RECOVERY_WAITING) {
+      transitionState(OVER_CURRENT_WARNING, "cmd_vel non-zero during recovery");
+    }
+  }
+}
+
+void RoboClaw::addCurrentSample(float m1_current, float m2_current) {
+  if (filter_window_seconds_ > 0.0) {
+    // Add to history buffers
+    m1_current_history_.push_back(m1_current);
+    m2_current_history_.push_back(m2_current);
+    
+    // Trim if exceeds max buffer size
+    while (m1_current_history_.size() > max_buffer_size_) {
+      m1_current_history_.pop_front();
+    }
+    while (m2_current_history_.size() > max_buffer_size_) {
+      m2_current_history_.pop_front();
+    }
+    
+    // Calculate averages
+    m1_current_average_ = calculateAverage(m1_current_history_);
+    m2_current_average_ = calculateAverage(m2_current_history_);
+  } else {
+    // Use instantaneous values (legacy mode)
+    m1_current_average_ = m1_current;
+    m2_current_average_ = m2_current;
+  }
+}
+
+void RoboClaw::updateBufferSize() {
+  if (filter_window_seconds_ > 0.0) {
+    max_buffer_size_ = std::min(
+        (size_t)(filter_window_seconds_ * sensor_update_rate_),
+        (size_t)(10.0 * sensor_update_rate_)  // Hard cap at 10 seconds
+    );
+    
+    // Trim buffers if they exceed new size
+    while (m1_current_history_.size() > max_buffer_size_) {
+      m1_current_history_.pop_front();
+    }
+    while (m2_current_history_.size() > max_buffer_size_) {
+      m2_current_history_.pop_front();
+    }
+  } else {
+    // Clear buffers when filtering is disabled
+    m1_current_history_.clear();
+    m2_current_history_.clear();
+    max_buffer_size_ = 0;
+  }
+}
+
+float RoboClaw::calculateAverage(const std::deque<float>& history) const {
+  if (history.empty()) {
+    return 0.0f;
+  }
+  
+  float sum = 0.0f;
+  for (float value : history) {
+    sum += value;
+  }
+  return sum / history.size();
+}
+
+void RoboClaw::transitionState(OverCurrentState new_state, const char* reason) {
+  if (new_state != current_protection_state_) {
+    const char* state_names[] = {"NORMAL", "OVER_CURRENT_WARNING", 
+                                  "RECOVERY_WAITING", "RECOVERING"};
+    RCUTILS_LOG_INFO("[RoboClaw::CurrentProtection] State: %s -> %s (%s)",
+                     state_names[current_protection_state_],
+                     state_names[new_state], reason);
+    current_protection_state_ = new_state;
+    
+    // Record timestamps for state transitions
+    if (new_state == OVER_CURRENT_WARNING) {
+      alarm_triggered_time_ = std::chrono::steady_clock::now();
+    } else if (new_state == RECOVERY_WAITING) {
+      recovery_start_time_ = std::chrono::steady_clock::now();
+    } else if (new_state == NORMAL) {
+      // Clear alarm flags when returning to normal
+      motorAlarms_ &= ~(kM1_OVER_CURRENT_ALARM | kM2_OVER_CURRENT_ALARM);
+    }
+  }
+}

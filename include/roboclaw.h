@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdarg>  // Include cstdarg for va_list
 #include <cstdint>
+#include <deque>    // For current history buffers
 #include <mutex>  // Include mutex header
 #include <rclcpp/logger.hpp>
 #include <sstream>
@@ -39,6 +40,14 @@ class RoboClaw {
     kM2_OVER_CURRENT = 0x02,        // Motor 2 current sense is too high.
     kM1_OVER_CURRENT_ALARM = 0x04,  // Motor 1 controller over current alarm.
     kM2_OVER_CURRENT_ALARM = 0x08,  // Motor 2 controller over current alarm.
+  };
+
+  // Over-current protection state machine states
+  enum OverCurrentState {
+    NORMAL,                // No over-current condition
+    OVER_CURRENT_WARNING,  // Average exceeds threshold, motors stopped
+    RECOVERY_WAITING,      // cmd_vel is zero, waiting for recovery timeout
+    RECOVERING             // Attempting to resume operation (future use)
   };
 
   // A convenience struction to pass around configuration information.
@@ -180,6 +189,17 @@ class RoboClaw {
   // Read a group of sensors from the RoboClaw.
   void readSensorGroup();
 
+  // Configure current protection parameters (called from motor_driver)
+  void setCurrentProtectionParams(float filter_window_seconds,
+                                   float recovery_timeout_seconds,
+                                   float sensor_update_rate);
+
+  // Notify RoboClaw of cmd_vel state (for recovery logic)
+  void notifyCmdVel(bool is_zero);
+
+  // Get current protection state (for debugging/monitoring)
+  OverCurrentState getCurrentProtectionState() const { return current_protection_state_; }
+
  protected:
   // Write a stream of bytes to the device.
   void writeN2(bool sendCRC, uint8_t cnt, ...);
@@ -290,6 +310,28 @@ class RoboClaw {
   int motorAlarms_;          // Motors alarms. Bit-wise OR of contributors.
   std::string device_name_;  // Device name of RoboClaw device.
   int portAddress_;          // Port number of RoboClaw device under control
+
+  // Current protection state machine and configuration
+  OverCurrentState current_protection_state_;
+  std::chrono::steady_clock::time_point alarm_triggered_time_;
+  std::chrono::steady_clock::time_point recovery_start_time_;
+  std::chrono::steady_clock::time_point last_nonzero_cmd_vel_time_;
+  float filter_window_seconds_;       // 0.0 = disabled, use instantaneous
+  float recovery_timeout_seconds_;    // 0.0 = disabled, no auto-recovery
+  float sensor_update_rate_;          // For buffer size calculation
+  
+  // Current averaging buffers
+  std::deque<float> m1_current_history_;
+  std::deque<float> m2_current_history_;
+  float m1_current_average_;
+  float m2_current_average_;
+  size_t max_buffer_size_;
+
+  // Methods for current protection
+  void addCurrentSample(float m1_current, float m2_current);
+  void updateBufferSize();
+  float calculateAverage(const std::deque<float>& history) const;
+  void transitionState(OverCurrentState new_state, const char* reason);
 
   // Get velocity (speed) result from the RoboClaw controller.
   int32_t getVelocityResult(uint8_t command);

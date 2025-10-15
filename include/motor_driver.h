@@ -6,7 +6,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <thread>
 
-class MotorDriver : public rclcpp::Node {
+class MotorDriver {
  public:
   MotorDriver();
   static MotorDriver &singleton();
@@ -21,6 +21,8 @@ class MotorDriver : public rclcpp::Node {
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
   void publisherThread();
   void watchdogTimerCallback();
+  rcl_interfaces::msg::SetParametersResult parametersCallback(
+      const std::vector<rclcpp::Parameter> &parameters);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmdVelSub_;
@@ -28,6 +30,7 @@ class MotorDriver : public rclcpp::Node {
       joint_state_publisher_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   std::thread publisher_thread_;
+  rclcpp::Node::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
   int accel_quad_pulses_per_second_;
   int baud_rate_;
@@ -56,6 +59,8 @@ class MotorDriver : public rclcpp::Node {
   float serial_timeout_;  // seconds
   float wheel_radius_;
   float wheel_separation_;
+  float current_filter_window_seconds_;  // For current averaging
+  float recovery_timeout_seconds_;       // For auto-recovery from over-current
 
   static MotorDriver *g_singleton;
 };

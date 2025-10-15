@@ -15,75 +15,84 @@
 #include "roboclaw.h"
 
 MotorDriver::MotorDriver()
-    : Node("motor_driver_node"),
-      device_name_("foo_bar"),
+    : device_name_("foo_bar"),
       wheel_radius_(0.10169),
       wheel_separation_(0.345) {
-  declareParameters();
-  initializeParameters();
 }
 
 void MotorDriver::declareParameters() {
-  this->declare_parameter<int>("accel_quad_pulses_per_second", 600);
-  this->declare_parameter<int>("baud_rate", 38400);
-  this->declare_parameter<std::string>("device_name", "roboclaw");
-  this->declare_parameter<int>("device_port", 123);
-  this->declare_parameter<bool>("do_debug", false);
-  this->declare_parameter<bool>("do_low_level_debug", false);
-  this->declare_parameter<float>("m1_p", 0.0);
-  this->declare_parameter<float>("m1_i", 0.0);
-  this->declare_parameter<float>("m1_d", 0.0);
-  this->declare_parameter<int>("m1_qpps", 0);
-  this->declare_parameter<float>("m1_max_current", 0.0);
-  this->declare_parameter<float>("m2_p", 0.0);
-  this->declare_parameter<float>("m2_i", 0.0);
-  this->declare_parameter<float>("m2_d", 0.0);
-  this->declare_parameter<int>("m2_qpps", 0);
-  this->declare_parameter<float>("max_angular_velocity", 0.0);
-  this->declare_parameter<float>("max_linear_velocity", 0.0);
-  this->declare_parameter<float>("m2_max_current", 0.0);
-  this->declare_parameter<float>("max_seconds_uncommanded_travel", 0.0);
-  this->declare_parameter<bool>("publish_joint_states", true);
-  this->declare_parameter<bool>("publish_odom", true);
-  this->declare_parameter<int>("quad_pulses_per_meter", 0);
-  this->declare_parameter<float>("quad_pulses_per_revolution", 0);
-  this->declare_parameter<float>("sensor_update_rate", 20.0);  // Hz
-  this->declare_parameter<float>("serial_timeout", 0.5);  // seconds
-  this->declare_parameter<float>("wheel_radius", 0.0);
-  this->declare_parameter<float>("wheel_separation", 0.0);
+  node_->declare_parameter<int>("accel_quad_pulses_per_second", 600);
+  node_->declare_parameter<int>("baud_rate", 38400);
+  node_->declare_parameter<std::string>("device_name", "roboclaw");
+  node_->declare_parameter<int>("device_port", 123);
+  node_->declare_parameter<bool>("do_debug", false);
+  node_->declare_parameter<bool>("do_low_level_debug", false);
+  node_->declare_parameter<float>("m1_p", 0.0);
+  node_->declare_parameter<float>("m1_i", 0.0);
+  node_->declare_parameter<float>("m1_d", 0.0);
+  node_->declare_parameter<int>("m1_qpps", 0);
+  node_->declare_parameter<float>("m1_max_current", 0.0);
+  node_->declare_parameter<float>("m2_p", 0.0);
+  node_->declare_parameter<float>("m2_i", 0.0);
+  node_->declare_parameter<float>("m2_d", 0.0);
+  node_->declare_parameter<int>("m2_qpps", 0);
+  node_->declare_parameter<float>("max_angular_velocity", 0.0);
+  node_->declare_parameter<float>("max_linear_velocity", 0.0);
+  node_->declare_parameter<float>("m2_max_current", 0.0);
+  node_->declare_parameter<float>("max_seconds_uncommanded_travel", 0.0);
+  node_->declare_parameter<bool>("publish_joint_states", true);
+  node_->declare_parameter<bool>("publish_odom", true);
+  node_->declare_parameter<int>("quad_pulses_per_meter", 0);
+  node_->declare_parameter<float>("quad_pulses_per_revolution", 0);
+  node_->declare_parameter<float>("sensor_update_rate", 20.0);  // Hz
+  node_->declare_parameter<float>("serial_timeout", 0.5);  // seconds
+  node_->declare_parameter<float>("wheel_radius", 0.0);
+  node_->declare_parameter<float>("wheel_separation", 0.0);
+  node_->declare_parameter<std::string>("roboclaw_status_topic", "roboclaw_status");
+  
+  // Declare current protection parameters with descriptions
+  rcl_interfaces::msg::ParameterDescriptor filter_desc;
+  filter_desc.description = "Time window for averaging motor current readings. 0.0=instantaneous (legacy), 0.1-10.0=averaged";
+  node_->declare_parameter<float>("current_filter_window_seconds", 1.0, filter_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor recovery_desc;
+  recovery_desc.description = "Seconds of zero cmd_vel required before auto-recovery from over-current. 0.0=disabled";
+  node_->declare_parameter<float>("recovery_timeout_seconds", 5.0, recovery_desc);
 }
 
 void MotorDriver::initializeParameters() {
-  this->get_parameter("accel_quad_pulses_per_second",
+  node_->get_parameter("accel_quad_pulses_per_second",
                       accel_quad_pulses_per_second_);
-  this->get_parameter("baud_rate", baud_rate_);
-  this->get_parameter("device_name", device_name_);
-  this->get_parameter("device_port", device_port_);
-  this->get_parameter("do_debug", do_debug_);
-  this->get_parameter("do_low_level_debug", do_low_level_debug_);
-  this->get_parameter("m1_p", m1_p_);
-  this->get_parameter("m1_i", m1_i_);
-  this->get_parameter("m1_d", m1_d_);
-  this->get_parameter("m1_qpps", m1_qpps_);
-  this->get_parameter("m1_max_current", m1_max_current_);
-  this->get_parameter("m2_p", m2_p_);
-  this->get_parameter("m2_i", m2_i_);
-  this->get_parameter("m2_d", m2_d_);
-  this->get_parameter("m2_qpps", m2_qpps_);
-  this->get_parameter("m2_max_current", m2_max_current_);
-  this->get_parameter("max_angular_velocity", max_angular_velocity_);
-  this->get_parameter("max_linear_velocity", max_linear_velocity_);
-  this->get_parameter("max_seconds_uncommanded_travel",
+  node_->get_parameter("baud_rate", baud_rate_);
+  node_->get_parameter("device_name", device_name_);
+  node_->get_parameter("device_port", device_port_);
+  node_->get_parameter("do_debug", do_debug_);
+  node_->get_parameter("do_low_level_debug", do_low_level_debug_);
+  node_->get_parameter("m1_p", m1_p_);
+  node_->get_parameter("m1_i", m1_i_);
+  node_->get_parameter("m1_d", m1_d_);
+  node_->get_parameter("m1_qpps", m1_qpps_);
+  node_->get_parameter("m1_max_current", m1_max_current_);
+  node_->get_parameter("m2_p", m2_p_);
+  node_->get_parameter("m2_i", m2_i_);
+  node_->get_parameter("m2_d", m2_d_);
+  node_->get_parameter("m2_qpps", m2_qpps_);
+  node_->get_parameter("m2_max_current", m2_max_current_);
+  node_->get_parameter("max_angular_velocity", max_angular_velocity_);
+  node_->get_parameter("max_linear_velocity", max_linear_velocity_);
+  node_->get_parameter("max_seconds_uncommanded_travel",
                       max_seconds_uncommanded_travel_);
-  this->get_parameter("publish_joint_states", publish_joint_states_);
-  this->get_parameter("publish_odom", publish_odom_);
-  this->get_parameter("quad_pulses_per_meter", quad_pulses_per_meter_);
-  this->get_parameter("quad_pulses_per_revolution",
+  node_->get_parameter("publish_joint_states", publish_joint_states_);
+  node_->get_parameter("publish_odom", publish_odom_);
+  node_->get_parameter("quad_pulses_per_meter", quad_pulses_per_meter_);
+  node_->get_parameter("quad_pulses_per_revolution",
                       quad_pulses_per_revolution_);
-  this->get_parameter("sensor_update_rate", sensor_update_rate_);
-  this->get_parameter("serial_timeout", serial_timeout_);
-  this->get_parameter("wheel_radius", wheel_radius_);
-  this->get_parameter("wheel_separation", wheel_separation_);
+  node_->get_parameter("sensor_update_rate", sensor_update_rate_);
+  node_->get_parameter("serial_timeout", serial_timeout_);
+  node_->get_parameter("wheel_radius", wheel_radius_);
+  node_->get_parameter("wheel_separation", wheel_separation_);
+  node_->get_parameter("current_filter_window_seconds", current_filter_window_seconds_);
+  node_->get_parameter("recovery_timeout_seconds", recovery_timeout_seconds_);
 
   logParameters();
 }
@@ -121,6 +130,8 @@ void MotorDriver::logParameters() const {
   RCUTILS_LOG_INFO("serial_timeout: %f", serial_timeout_);
   RCUTILS_LOG_INFO("wheel_radius: %f", wheel_radius_);
   RCUTILS_LOG_INFO("wheel_separation: %f", wheel_separation_);
+  RCUTILS_LOG_INFO("current_filter_window_seconds: %f", current_filter_window_seconds_);
+  RCUTILS_LOG_INFO("recovery_timeout_seconds: %f", recovery_timeout_seconds_);
 }
 
 void MotorDriver::cmdVelCallback(
@@ -132,7 +143,19 @@ void MotorDriver::cmdVelCallback(
     double yaw_velocity =
         std::min(std::max((float)msg->angular.z, -max_angular_velocity_),
                  max_angular_velocity_);
-    if ((msg->linear.x == 0) && (msg->angular.z == 0)) {
+    
+    bool is_zero = (msg->linear.x == 0) && (msg->angular.z == 0);
+    RoboClaw::singleton()->notifyCmdVel(is_zero);
+    
+    // Block movement commands if in fault state
+    auto state = RoboClaw::singleton()->getCurrentProtectionState();
+    if (state == RoboClaw::OVER_CURRENT_WARNING || state == RoboClaw::RECOVERY_WAITING) {
+      // Don't send movement commands while in fault/recovery state
+      RoboClaw::singleton()->stop();
+      return;
+    }
+    
+    if (is_zero) {
       RoboClaw::singleton()->stop();
     } else if ((fabs(x_velocity) > 0.01) || (fabs(yaw_velocity) > 0.01)) {
       const double m1_desired_velocity =
@@ -155,7 +178,12 @@ void MotorDriver::cmdVelCallback(
 
 void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
   node_ = node;
+  declareParameters();
   initializeParameters();
+  
+  // Read current protection parameters from the shared node
+  node_->get_parameter("current_filter_window_seconds", current_filter_window_seconds_);
+  node_->get_parameter("recovery_timeout_seconds", recovery_timeout_seconds_);
 
   RoboClaw::TPIDQ m1Pid = {m1_p_, m1_i_, m1_d_, (uint32_t)m1_qpps_,
                            m1_max_current_};
@@ -165,6 +193,11 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
   new RoboClaw(m1Pid, m2Pid, m1_max_current_, m2_max_current_,
                device_name_.c_str(), device_port_, baud_rate_, serial_timeout_,
                do_debug_, do_low_level_debug_);
+  
+  // Configure current protection parameters
+  RoboClaw::singleton()->setCurrentProtectionParams(
+      current_filter_window_seconds_, recovery_timeout_seconds_, sensor_update_rate_);
+  
   RCUTILS_LOG_INFO("Main battery: %f",
                    RoboClaw::singleton()->getMainBatteryLevel());
 
@@ -178,15 +211,21 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
       "/cmd_vel", qos,
       std::bind(&MotorDriver::cmdVelCallback, this, std::placeholders::_1));
 
+  // Set up parameter callback for runtime updates on the shared node
+  auto param_callback = [this](const std::vector<rclcpp::Parameter> &parameters) {
+    return this->parametersCallback(parameters);
+  };
+  param_callback_handle_ = node_->add_on_set_parameters_callback(param_callback);
+
   if (publish_joint_states_) {
     joint_state_publisher_ =
-        this->create_publisher<sensor_msgs::msg::JointState>("joint_states",
+        node_->create_publisher<sensor_msgs::msg::JointState>("joint_states",
                                                              qos);
   }
 
   if (publish_odom_) {
     odom_publisher_ =
-        this->create_publisher<nav_msgs::msg::Odometry>("odom", qos);
+        node_->create_publisher<nav_msgs::msg::Odometry>("odom", qos);
   }
 
   // Start the publisher thread if we are publishing joint states or odometry
@@ -312,6 +351,46 @@ void MotorDriver::publisherThread() {
       }
     }
   }
+}
+
+rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
+    const std::vector<rclcpp::Parameter> &parameters) {
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  
+  for (const auto &param : parameters) {
+    if (param.get_name() == "current_filter_window_seconds") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 10.0) {
+        current_filter_window_seconds_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setCurrentProtectionParams(
+              current_filter_window_seconds_, recovery_timeout_seconds_, sensor_update_rate_);
+        }
+        RCUTILS_LOG_INFO("[MotorDriver] Updated current_filter_window_seconds to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "current_filter_window_seconds must be between 0.0 and 10.0";
+        return result;
+      }
+    } else if (param.get_name() == "recovery_timeout_seconds") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 60.0) {
+        recovery_timeout_seconds_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setCurrentProtectionParams(
+              current_filter_window_seconds_, recovery_timeout_seconds_, sensor_update_rate_);
+        }
+        RCUTILS_LOG_INFO("[MotorDriver] Updated recovery_timeout_seconds to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "recovery_timeout_seconds must be between 0.0 and 60.0";
+        return result;
+      }
+    }
+  }
+  
+  return result;
 }
 
 MotorDriver &MotorDriver::singleton() {

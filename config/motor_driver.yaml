@@ -70,6 +70,18 @@ motor_driver_node:
     # RoboClaw status messages are published.
     sensor_rate_hz: 20.0
 
+    # Current protection parameters
+    # Time window (in seconds) for averaging motor current readings
+    # 0.0 = disabled (uses instantaneous current - legacy behavior)
+    # 0.1-10.0 = uses averaged current over the specified window
+    current_filter_window_seconds: 1.0
+    
+    # Recovery timeout (in seconds) - time of zero cmd_vel required 
+    # before auto-recovery from over-current condition
+    # 0.0 = disabled (no auto-recovery, requires manual intervention)
+    # 1.0-60.0 = seconds to wait before attempting recovery
+    recovery_timeout_seconds: 5.0
+
     # Debugging control.
     do_debug: false # True => Log RoboClaw commands and responses.
     do_low_level_debug: false # True => Log low-level serial and RoboClaw data.

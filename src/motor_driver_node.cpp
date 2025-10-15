@@ -8,7 +8,7 @@
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
   rclcpp::Node::SharedPtr node =
-      rclcpp::Node::make_shared("ros2_roboclaw_driver_node");
+      rclcpp::Node::make_shared("roboclaw");
   MotorDriver &motorDriver = MotorDriver::singleton();
   motorDriver.onInit(node);
 
@@ -19,8 +19,6 @@ int main(int argc, char *argv[]) {
   qos.avoid_ros_namespace_conventions(false);
 
   std::string statusTopicName;
-  node->declare_parameter<std::string>("roboclaw_status_topic",
-                                       "roboclaw_status");
   node->get_parameter("roboclaw_status_topic", statusTopicName);
   RCUTILS_LOG_INFO("[motor_driver_node] roboclaw_status_topic: %s",
                    statusTopicName.c_str());
