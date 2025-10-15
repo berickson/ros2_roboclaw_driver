@@ -48,6 +48,7 @@ void MotorDriver::declareParameters() {
   this->declare_parameter<int>("quad_pulses_per_meter", 0);
   this->declare_parameter<float>("quad_pulses_per_revolution", 0);
   this->declare_parameter<float>("sensor_update_rate", 20.0);  // Hz
+  this->declare_parameter<float>("serial_timeout", 0.5);  // seconds
   this->declare_parameter<float>("wheel_radius", 0.0);
   this->declare_parameter<float>("wheel_separation", 0.0);
 }
@@ -80,6 +81,7 @@ void MotorDriver::initializeParameters() {
   this->get_parameter("quad_pulses_per_revolution",
                       quad_pulses_per_revolution_);
   this->get_parameter("sensor_update_rate", sensor_update_rate_);
+  this->get_parameter("serial_timeout", serial_timeout_);
   this->get_parameter("wheel_radius", wheel_radius_);
   this->get_parameter("wheel_separation", wheel_separation_);
 
@@ -116,12 +118,13 @@ void MotorDriver::logParameters() const {
   RCUTILS_LOG_INFO("quad_pulses_per_revolution: %3.4f",
                    quad_pulses_per_revolution_);
   RCUTILS_LOG_INFO("sensor_update_rate: %f", sensor_update_rate_);
+  RCUTILS_LOG_INFO("serial_timeout: %f", serial_timeout_);
   RCUTILS_LOG_INFO("wheel_radius: %f", wheel_radius_);
   RCUTILS_LOG_INFO("wheel_separation: %f", wheel_separation_);
 }
 
 void MotorDriver::cmdVelCallback(
-    const geometry_msgs::msg::Twist::SharedPtr msg) const {
+    const geometry_msgs::msg::Twist::SharedPtr msg) {
   if (RoboClaw::singleton() != nullptr) {
     double x_velocity =
         std::min(std::max((float)msg->linear.x, -max_linear_velocity_),
@@ -141,13 +144,11 @@ void MotorDriver::cmdVelCallback(
           m1_desired_velocity * quad_pulses_per_meter_;
       const int32_t m2_quad_pulses_per_second =
           m2_desired_velocity * quad_pulses_per_meter_;
-      const int32_t m1_max_distance =
-          fabs(m1_quad_pulses_per_second * max_seconds_uncommanded_travel_);
-      const int32_t m2_max_distance =
-          fabs(m2_quad_pulses_per_second * max_seconds_uncommanded_travel_);
-      RoboClaw::singleton()->doMixedSpeedAccelDist(
+      
+      // Use immediate speed+accel command (no distance buffering)
+      RoboClaw::singleton()->doMixedSpeedAccel(
           accel_quad_pulses_per_second_, m1_quad_pulses_per_second,
-          m1_max_distance, m2_quad_pulses_per_second, m2_max_distance);
+          m2_quad_pulses_per_second);
     }
   }
 }
@@ -162,8 +163,8 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
                            m2_max_current_};
 
   new RoboClaw(m1Pid, m2Pid, m1_max_current_, m2_max_current_,
-               device_name_.c_str(), device_port_, baud_rate_, do_debug_,
-               do_low_level_debug_);
+               device_name_.c_str(), device_port_, baud_rate_, serial_timeout_,
+               do_debug_, do_low_level_debug_);
   RCUTILS_LOG_INFO("Main battery: %f",
                    RoboClaw::singleton()->getMainBatteryLevel());
 

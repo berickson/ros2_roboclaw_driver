@@ -16,6 +16,7 @@
 #include <sstream>
 
 #include "roboclaw_cmd_do_buffered_m1m2_drive_speed_accel_distance.h"
+#include "roboclaw_cmd_do_m1m2_drive_speed_accel.h"
 #include "roboclaw_cmd_read_encoder.h"
 #include "roboclaw_cmd_read_encoder_speed.h"
 #include "roboclaw_cmd_read_firmware_version.h"
@@ -23,10 +24,12 @@
 #include "roboclaw_cmd_read_main_battery_voltage.h"
 #include "roboclaw_cmd_read_motor_currents.h"
 #include "roboclaw_cmd_read_motor_velocity_pidq.h"
+#include "roboclaw_cmd_read_serial_timeout.h"
 #include "roboclaw_cmd_read_status.h"
 #include "roboclaw_cmd_read_temperature.h"
 #include "roboclaw_cmd_set_encoder_value.h"
 #include "roboclaw_cmd_set_pid.h"
+#include "roboclaw_cmd_set_serial_timeout.h"
 #include "ros2_roboclaw_driver/srv/reset_encoders.h"
 
 const char *RoboClaw::motorNames_[] = {"M1", "M2", "NONE"};
@@ -36,7 +39,8 @@ std::mutex RoboClaw::buffered_command_mutex_;
 
 RoboClaw::RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
                    float m2MaxCurrent, std::string device_name,
-                   uint8_t device_port, uint32_t baud_rate, bool(do_debug),
+                   uint8_t device_port, uint32_t baud_rate,
+                   float serial_timeout, bool(do_debug),
                    bool do_low_level_debug)
     : do_debug_(do_debug),
       do_low_level_debug_(do_low_level_debug),
@@ -51,6 +55,15 @@ RoboClaw::RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
   openPort();
   RCUTILS_LOG_INFO("[RoboClaw::RoboClaw] RoboClaw software version: %s",
                    getVersion().c_str());
+  try {
+    setSerialTimeout(serial_timeout);
+    RCUTILS_LOG_INFO("[RoboClaw::RoboClaw] Serial timeout set to: %f seconds",
+                     serial_timeout);
+  } catch (const std::exception& e) {
+    RCUTILS_LOG_WARN(
+        "[RoboClaw::RoboClaw] Failed to set serial timeout: %s. "
+        "Continuing with default timeout.", e.what());
+  }
   setM1PID(m1Pid.p, m1Pid.i, m1Pid.d, m1Pid.qpps);
   setM2PID(m2Pid.p, m2Pid.i, m2Pid.d, m2Pid.qpps);
   CmdSetEncoderValue m1(*this, kM1, 0);
@@ -76,6 +89,15 @@ void RoboClaw::doMixedSpeedAccelDist(uint32_t accel_quad_pulses_per_second,
   CmdDoBufferedM1M2DriveSpeedAccelDistance command(
       *this, accel_quad_pulses_per_second, m1_quad_pulses_per_second,
       m1_max_distance, m2_quad_pulses_per_second, m2_max_distance);
+  command.execute();
+}
+
+void RoboClaw::doMixedSpeedAccel(uint32_t accel_quad_pulses_per_second,
+                                 int32_t m1_quad_pulses_per_second,
+                                 int32_t m2_quad_pulses_per_second) {
+  CmdDoM1M2DriveSpeedAccel command(
+      *this, accel_quad_pulses_per_second, m1_quad_pulses_per_second,
+      m2_quad_pulses_per_second);
   command.execute();
 }
 
@@ -565,8 +587,34 @@ void RoboClaw::setM2PID(float p, float i, float d, uint32_t qpps) {
   command.execute();
 }
 
+void RoboClaw::setSerialTimeout(float timeout_seconds) {
+  // Convert seconds to tenths of seconds (0.1s units)
+  // Clamp to valid range: 0-255 tenths = 0.0-25.5 seconds
+  float timeout_tenths_float = timeout_seconds * 10.0f;
+  uint8_t timeout_tenths;
+  
+  if (timeout_tenths_float < 0.0f) {
+    timeout_tenths = 0;
+  } else if (timeout_tenths_float > 255.0f) {
+    timeout_tenths = 255;
+  } else {
+    timeout_tenths = static_cast<uint8_t>(timeout_tenths_float);
+  }
+  
+  CmdSetSerialTimeout command(*this, timeout_tenths);
+  command.execute();
+}
+
+float RoboClaw::getSerialTimeout() {
+  uint8_t timeout_tenths = 0;
+  CmdReadSerialTimeout command(*this, timeout_tenths);
+  command.execute();
+  // Convert tenths of seconds back to seconds
+  return static_cast<float>(timeout_tenths) / 10.0f;
+}
+
 void RoboClaw::stop() {
-  CmdDoBufferedM1M2DriveSpeedAccelDistance stopCommand(*this, 0, 0, 0, 0, 0);
+  CmdDoM1M2DriveSpeedAccel stopCommand(*this, 0, 0, 0);
   stopCommand.execute();
 }
 

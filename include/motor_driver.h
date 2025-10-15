@@ -18,8 +18,9 @@ class MotorDriver : public rclcpp::Node {
   void eulerToQuaternion(float roll, float pitch, float yaw, float *q);
   void initializeParameters();
   void logParameters() const;
-  void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg) const;
+  void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
   void publisherThread();
+  void watchdogTimerCallback();
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmdVelSub_;
@@ -52,6 +53,7 @@ class MotorDriver : public rclcpp::Node {
   int quad_pulses_per_meter_;
   float quad_pulses_per_revolution_;
   float sensor_update_rate_;  // Hz
+  float serial_timeout_;  // seconds
   float wheel_radius_;
   float wheel_separation_;
 

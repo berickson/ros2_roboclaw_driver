@@ -74,8 +74,8 @@ class RoboClaw {
   // Constructor.
   RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
            float m2MaxCurrent, std::string device_name, uint8_t device_port,
-           uint32_t baud_rate, bool do_debug = false,
-           bool do_low_level_debug = false);
+           uint32_t baud_rate, float serial_timeout = 0.5,
+           bool do_debug = false, bool do_low_level_debug = false);
 
   ~RoboClaw();
 
@@ -98,6 +98,10 @@ class RoboClaw {
                              uint32_t m1_max_distance,
                              int32_t m2_quad_pulses_per_second,
                              uint32_t m2_max_distance);
+
+  void doMixedSpeedAccel(uint32_t accel_quad_pulses_per_second,
+                         int32_t m1_quad_pulses_per_second,
+                         int32_t m2_quad_pulses_per_second);
 
   // Get RoboClaw error status bits.
   uint32_t getErrorStatus();
@@ -156,6 +160,16 @@ class RoboClaw {
 
   // Get RoboClaw software version.
   std::string getVersion();
+
+  // Set the serial timeout in seconds (0.0-25.5 seconds).
+  // The timeout determines how long the RoboClaw waits for serial commands.
+  // A value of 0 disables the timeout.
+  // Internally stored as a single byte in tenths of seconds (0-255).
+  void setSerialTimeout(float timeout_seconds);
+
+  // Read the current serial timeout setting in seconds.
+  // Returns the timeout as a floating point value in seconds (0.0-25.5).
+  float getSerialTimeout();
 
   // Stop motion.
   void stop();
@@ -224,6 +238,8 @@ class RoboClaw {
     MIXEDLEFT = 11,
     MIXEDFB = 12,
     MIXEDLR = 13,
+    SETSERIALTIMEOUT = 14,
+    GETSERIALTIMEOUT = 15,
     RESETENC = 20,
     GETVERSION = 21,
     SETM1ENCODER = 22,
@@ -366,6 +382,7 @@ class RoboClaw {
 
   friend class Cmd;
   friend class CmdDoBufferedM1M2DriveSpeedAccelDistance;
+  friend class CmdDoM1M2DriveSpeedAccel;
   friend class CmdReadEncoderSpeed;
   friend class CmdReadEncoder;
   friend class CmdReadFirmwareVersion;
@@ -373,10 +390,12 @@ class RoboClaw {
   friend class CmdReadMainBatteryVoltage;
   friend class CmdReadMotorCurrents;
   friend class CmdReadMotorVelocityPIDQ;
+  friend class CmdReadSerialTimeout;
   friend class CmdReadStatus;
   friend class CmdReadTemperature;
   friend class CmdSetEncoderValue;
   friend class CmdSetPid;
+  friend class CmdSetSerialTimeout;
 
  protected:
   DebugLog debug_log_;
