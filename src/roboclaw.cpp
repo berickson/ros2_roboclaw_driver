@@ -324,7 +324,7 @@ int32_t RoboClaw::getVelocityResult(uint8_t command) {
   return 0;
 }
 
-uint32_t RoboClaw::getM1Encoder() {
+int32_t RoboClaw::getM1Encoder() {
   return g_sensor_value_group_.m1_encoder_command_result.value;
 }
 
@@ -332,7 +332,7 @@ int8_t RoboClaw::getM1EncoderStatus() {
   return g_sensor_value_group_.m1_encoder_command_result.status;
 }
 
-uint32_t RoboClaw::getM2Encoder() {
+int32_t RoboClaw::getM2Encoder() {
   return g_sensor_value_group_.m2_encoder_command_result.value;
 }
 
@@ -550,6 +550,21 @@ void RoboClaw::readSensorGroup() {
     cmd_read_status.execute();
     g_sensor_value_group_.error_status = status;
     g_sensor_value_group_.error_string = singleton()->getErrorString(status);
+    
+    // Append current protection status if not normal
+    if (current_protection_state_ != NORMAL) {
+      const char* state_names[] = {"NORMAL", "OVER_CURRENT_WARNING", 
+                                    "RECOVERY_WAITING", "RECOVERING"};
+      if (g_sensor_value_group_.error_string.empty() || 
+          g_sensor_value_group_.error_string == "normal") {
+        g_sensor_value_group_.error_string = "[";
+      } else {
+        g_sensor_value_group_.error_string += "[";
+      }
+      g_sensor_value_group_.error_string += state_names[current_protection_state_];
+      g_sensor_value_group_.error_string += "] ";
+    }
+    
     g_sensor_value_group_.logic_battery_level = logic_battery_level;
     g_sensor_value_group_.m1_encoder_command_result = m1_encoder_command_result;
     g_sensor_value_group_.m1_pidq = m1_read_velocity_pidq_result;

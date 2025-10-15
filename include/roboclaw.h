@@ -76,7 +76,7 @@ class RoboClaw {
 
   // Holds RoboClaw encoder result.
   typedef struct {
-    uint32_t value;
+    int32_t value;
     uint8_t status;
   } EncodeResult;
 
@@ -127,14 +127,14 @@ class RoboClaw {
   float getMainBatteryLevel();
 
   // Get the encoder value for motor 1.
-  uint32_t getM1Encoder();
+  int32_t getM1Encoder();
 
   // Get the status of the encoder for motor 1.
   // 0 = no error, 1 = encoder command error, 2 = encoder not found.
   int8_t getM1EncoderStatus();
 
   // Get the encoder value for motor 2.
-  uint32_t getM2Encoder();
+  int32_t getM2Encoder();
 
   // Get the status of the encoder for motor 2.
   // 0 = no error, 1 = encoder command error, 2 = encoder not found.
