@@ -124,12 +124,10 @@ int main(int argc, char *argv[]) {
 
       roboClawStatus.error_string = RoboClaw::singleton()->getErrorString();
 
-      // Add connection state
-      const char* connection_state_names[] = {"CONNECTED", "DISCONNECTED"};
-      roboClawStatus.connection_state = 
-          connection_state_names[RoboClaw::singleton()->getConnectionState()];
-
-      statusPublisher->publish(roboClawStatus);
+      // Only publish status when connected (connection state is in diagnostics)
+      if (RoboClaw::singleton()->getConnectionState() == RoboClaw::CONNECTED) {
+        statusPublisher->publish(roboClawStatus);
+      }
     } catch (RoboClaw::TRoboClawException *e) {
       RCUTILS_LOG_ERROR("[motor_driver_node] Exception: %s", e->what());
     } catch (...) {

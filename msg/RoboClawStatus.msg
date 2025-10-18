@@ -20,4 +20,3 @@ float32  main_battery_voltage
 float32  logic_battery_voltage
 float32  temperature
 string  error_string
-string  connection_state
