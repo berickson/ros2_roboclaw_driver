@@ -40,13 +40,89 @@ void diagnosticOverall(diagnostic_updater::DiagnosticStatusWrapper &stat) {
       stat.summary(diagnostic_msgs::msg::DiagnosticStatus::WARN, error_string);
     }
     
-    // Note: getVersion() sends a command, so we skip it in diagnostics to avoid extra communication
+    // Note: getVersion() sends a command, so we use cached version instead
+    
+    // Firmware version (cached at startup)
+    stat.add("Firmware Version", roboclaw->getCachedFirmwareVersion());
+    
+    // Connection details
+    stat.add("Connection State", "CONNECTED");
+    stat.add("Consecutive Errors", static_cast<int>(roboclaw->getConsecutiveErrors()));
+    stat.add("Total Messages", static_cast<int>(roboclaw->getTotalMessages()));
+    stat.add("Total Errors", static_cast<int>(roboclaw->getTotalErrors()));
+    
+    // Calculate time since last successful communication
+    auto now = std::chrono::steady_clock::now();
+    auto last_comm = roboclaw->getLastSuccessfulCommunication();
+    auto comm_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_comm);
+    stat.add("Last Successful Communication (ms ago)", static_cast<int>(comm_elapsed.count()));
+    
+    // Hardware status
     stat.add("Error Status", static_cast<int>(error_status));
     stat.add("Error String", error_string);
-    stat.add("Connection State", "CONNECTED");
     
+    // Battery voltages
+    float main_battery = roboclaw->getMainBatteryLevel();
+    float logic_battery = roboclaw->getLogicBatteryLevel();
+    stat.add("Main Battery Voltage", main_battery);
+    stat.add("Logic Battery Voltage", logic_battery);
+    
+    // Check battery warning/error flags from device
+    if (error_status & 0x0020) stat.add("Main Battery High Error", "TRUE");
+    if (error_status & 0x0040) stat.add("Logic Battery High Error", "TRUE");
+    if (error_status & 0x0080) stat.add("Logic Battery Low Error", "TRUE");
+    if (error_status & 0x0400) stat.add("Main Battery High Warning", "TRUE");
+    if (error_status & 0x0800) stat.add("Main Battery Low Warning", "TRUE");
+    
+    // Motor currents (instantaneous from device + smoothed from driver)
+    RoboClaw::TMotorCurrents currents = roboclaw->getMotorCurrents();
+    stat.add("Motor 1 Current", currents.m1Current);
+    stat.add("Motor 1 Current Smoothed", roboclaw->getM1CurrentSmoothed());
+    stat.add("Motor 2 Current", currents.m2Current);
+    stat.add("Motor 2 Current Smoothed", roboclaw->getM2CurrentSmoothed());
+    
+    // Motor encoder positions, velocities, and status
+    stat.add("Motor 1 Encoder", static_cast<int>(roboclaw->getM1Encoder()));
+    stat.add("Motor 1 Encoder Status", static_cast<int>(roboclaw->getM1EncoderStatus()));
+    stat.add("Motor 1 Velocity", static_cast<int>(roboclaw->getVelocity(RoboClaw::kM1)));
+    stat.add("Motor 2 Encoder", static_cast<int>(roboclaw->getM2Encoder()));
+    stat.add("Motor 2 Encoder Status", static_cast<int>(roboclaw->getM2EncoderStatus()));
+    stat.add("Motor 2 Velocity", static_cast<int>(roboclaw->getVelocity(RoboClaw::kM2)));
+    
+    // Check motor fault flags from device
+    if (error_status & 0x0001) stat.add("Motor 1 Over-Current Warning", "TRUE");
+    if (error_status & 0x0200) stat.add("Motor 1 Driver Fault", "TRUE");
+    if (error_status & 0x0002) stat.add("Motor 2 Over-Current Warning", "TRUE");
+    if (error_status & 0x0100) stat.add("Motor 2 Driver Fault", "TRUE");
+    
+    // Temperature
+    float temperature = roboclaw->getTemperature();
+    stat.add("Temperature", temperature);
+    
+    // Check temperature warning/error flags from device
+    if (error_status & 0x0004) stat.add("E-Stop", "TRUE");
+    if (error_status & 0x0008) stat.add("Temperature Error", "TRUE");
+    if (error_status & 0x0010) stat.add("Temperature2 Error", "TRUE");
+    if (error_status & 0x1000) stat.add("Temperature Warning", "TRUE");
+    if (error_status & 0x2000) stat.add("Temperature2 Warning", "TRUE");
+    
+    // Current protection state (software state machine)
     const char* protection_state_names[] = {"NORMAL", "OVER_CURRENT_WARNING", "RECOVERY_WAITING", "RECOVERING"};
     stat.add("Current Protection State", protection_state_names[protection_state]);
+    
+    // Time since last non-zero cmd_vel (for recovery monitoring)
+    auto last_cmd_vel = roboclaw->getLastNonzeroCmdVelTime();
+    auto cmd_vel_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cmd_vel);
+    stat.add("Time Since Nonzero Cmd_Vel (ms)", static_cast<int>(cmd_vel_elapsed.count()));
+    
+    // Performance: sensor update timing
+    auto last_sensor_read = roboclaw->getLastSensorReadTime();
+    auto sensor_now = std::chrono::system_clock::now();
+    auto sensor_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(sensor_now - last_sensor_read);
+    stat.add("Time Since Last Sensor Update (ms)", static_cast<int>(sensor_elapsed.count()));
+    
+    // Note: sensor_update_rate would require tracking time between readSensorGroup calls
+    // This could be added in a future enhancement with additional state tracking
   } catch (RoboClaw::TRoboClawException* e) {
     stat.summary(diagnostic_msgs::msg::DiagnosticStatus::ERROR, std::string("Exception: ") + e->what());
   } catch (...) {

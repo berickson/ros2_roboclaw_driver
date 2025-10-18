@@ -21,43 +21,258 @@ MotorDriver::MotorDriver()
 }
 
 void MotorDriver::declareParameters() {
-  node_->declare_parameter<int>("accel_quad_pulses_per_second", 600);
-  node_->declare_parameter<int>("baud_rate", 38400);
-  node_->declare_parameter<std::string>("device_name", "roboclaw");
-  node_->declare_parameter<int>("device_port", 123);
-  node_->declare_parameter<bool>("do_debug", false);
-  node_->declare_parameter<bool>("do_low_level_debug", false);
-  node_->declare_parameter<float>("m1_p", 0.0);
-  node_->declare_parameter<float>("m1_i", 0.0);
-  node_->declare_parameter<float>("m1_d", 0.0);
-  node_->declare_parameter<int>("m1_qpps", 0);
-  node_->declare_parameter<float>("m1_max_current", 0.0);
-  node_->declare_parameter<float>("m2_p", 0.0);
-  node_->declare_parameter<float>("m2_i", 0.0);
-  node_->declare_parameter<float>("m2_d", 0.0);
-  node_->declare_parameter<int>("m2_qpps", 0);
-  node_->declare_parameter<float>("max_angular_velocity", 0.0);
-  node_->declare_parameter<float>("max_linear_velocity", 0.0);
-  node_->declare_parameter<float>("m2_max_current", 0.0);
-  node_->declare_parameter<float>("max_seconds_uncommanded_travel", 0.0);
-  node_->declare_parameter<bool>("publish_joint_states", true);
-  node_->declare_parameter<bool>("publish_odom", true);
-  node_->declare_parameter<int>("quad_pulses_per_meter", 0);
-  node_->declare_parameter<float>("quad_pulses_per_revolution", 0);
-  node_->declare_parameter<float>("sensor_update_rate", 20.0);  // Hz
-  node_->declare_parameter<float>("serial_timeout", 0.5);  // seconds
-  node_->declare_parameter<float>("wheel_radius", 0.0);
-  node_->declare_parameter<float>("wheel_separation", 0.0);
-  node_->declare_parameter<std::string>("roboclaw_status_topic", "roboclaw_status");
+  // 1. Device Connection (Read-Only, require restart)
+  rcl_interfaces::msg::ParameterDescriptor device_name_desc;
+  device_name_desc.description = "Serial device path for RoboClaw";
+  device_name_desc.read_only = true;
+  node_->declare_parameter<std::string>("device_name", "roboclaw", device_name_desc);
   
-  // Declare current protection parameters with descriptions
+  rcl_interfaces::msg::ParameterDescriptor baud_rate_desc;
+  baud_rate_desc.description = "Serial baud rate (must match RoboClaw config)";
+  baud_rate_desc.read_only = true;
+  baud_rate_desc.integer_range.resize(1);
+  baud_rate_desc.integer_range[0].from_value = 9600;
+  baud_rate_desc.integer_range[0].to_value = 460800;
+  baud_rate_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("baud_rate", 38400, baud_rate_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor device_port_desc;
+  device_port_desc.description = "RoboClaw device address on serial bus";
+  device_port_desc.read_only = true;
+  device_port_desc.integer_range.resize(1);
+  device_port_desc.integer_range[0].from_value = 128;
+  device_port_desc.integer_range[0].to_value = 135;
+  device_port_desc.integer_range[0].step = 1;
+  node_->declare_parameter<int>("device_port", 123, device_port_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor serial_timeout_desc;
+  serial_timeout_desc.description = "Timeout for serial communication in seconds (0.0=disabled)";
+  serial_timeout_desc.read_only = true;
+  serial_timeout_desc.floating_point_range.resize(1);
+  serial_timeout_desc.floating_point_range[0].from_value = 0.0;
+  serial_timeout_desc.floating_point_range[0].to_value = 5.0;
+  serial_timeout_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("serial_timeout", 0.5, serial_timeout_desc);
+  
+  // 2. Robot Geometry (Read-Only, require restart)
+  rcl_interfaces::msg::ParameterDescriptor wheel_separation_desc;
+  wheel_separation_desc.description = "Distance between left and right wheel contact points (meters)";
+  wheel_separation_desc.read_only = true;
+  wheel_separation_desc.floating_point_range.resize(1);
+  wheel_separation_desc.floating_point_range[0].from_value = 0.1;
+  wheel_separation_desc.floating_point_range[0].to_value = 2.0;
+  wheel_separation_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("wheel_separation", 0.0, wheel_separation_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor meters_per_quad_pulse_desc;
+  meters_per_quad_pulse_desc.description = "Linear distance traveled per encoder count (meters). Measure by driving robot a known distance and dividing by encoder counts. Set to 0.0 to use deprecated quad_pulses_per_meter instead.";
+  meters_per_quad_pulse_desc.read_only = true;
+  meters_per_quad_pulse_desc.floating_point_range.resize(1);
+  meters_per_quad_pulse_desc.floating_point_range[0].from_value = 0.0;
+  meters_per_quad_pulse_desc.floating_point_range[0].to_value = 0.01;
+  meters_per_quad_pulse_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("meters_per_quad_pulse", 0.0, meters_per_quad_pulse_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor wheel_radius_desc;
+  wheel_radius_desc.description = "DEPRECATED: Use meters_per_quad_pulse instead. Wheel radius in meters";
+  wheel_radius_desc.read_only = true;
+  wheel_radius_desc.floating_point_range.resize(1);
+  wheel_radius_desc.floating_point_range[0].from_value = 0.01;
+  wheel_radius_desc.floating_point_range[0].to_value = 0.5;
+  wheel_radius_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("wheel_radius", 0.0, wheel_radius_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor quad_pulses_per_meter_desc;
+  quad_pulses_per_meter_desc.description = "DEPRECATED: Use meters_per_quad_pulse instead. Encoder counts per meter";
+  quad_pulses_per_meter_desc.read_only = true;
+  quad_pulses_per_meter_desc.integer_range.resize(1);
+  quad_pulses_per_meter_desc.integer_range[0].from_value = 100;
+  quad_pulses_per_meter_desc.integer_range[0].to_value = 10000;
+  quad_pulses_per_meter_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("quad_pulses_per_meter", 0, quad_pulses_per_meter_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor quad_pulses_per_revolution_desc;
+  quad_pulses_per_revolution_desc.description = "DEPRECATED: Use meters_per_quad_pulse instead. Encoder counts per wheel revolution";
+  quad_pulses_per_revolution_desc.read_only = true;
+  quad_pulses_per_revolution_desc.floating_point_range.resize(1);
+  quad_pulses_per_revolution_desc.floating_point_range[0].from_value = 100.0;
+  quad_pulses_per_revolution_desc.floating_point_range[0].to_value = 10000.0;
+  quad_pulses_per_revolution_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("quad_pulses_per_revolution", 0, quad_pulses_per_revolution_desc);
+  
+  // 3. Motor Control - PID Tuning (Runtime changeable)
+  rcl_interfaces::msg::ParameterDescriptor m1_p_desc;
+  m1_p_desc.description = "Motor 1 (left) PID proportional gain";
+  m1_p_desc.floating_point_range.resize(1);
+  m1_p_desc.floating_point_range[0].from_value = 0.0;
+  m1_p_desc.floating_point_range[0].to_value = 100000.0;
+  m1_p_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_p", 0.0, m1_p_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m1_i_desc;
+  m1_i_desc.description = "Motor 1 (left) PID integral gain";
+  m1_i_desc.floating_point_range.resize(1);
+  m1_i_desc.floating_point_range[0].from_value = 0.0;
+  m1_i_desc.floating_point_range[0].to_value = 100000.0;
+  m1_i_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_i", 0.0, m1_i_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m1_d_desc;
+  m1_d_desc.description = "Motor 1 (left) PID derivative gain";
+  m1_d_desc.floating_point_range.resize(1);
+  m1_d_desc.floating_point_range[0].from_value = 0.0;
+  m1_d_desc.floating_point_range[0].to_value = 100000.0;
+  m1_d_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_d", 0.0, m1_d_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m1_qpps_desc;
+  m1_qpps_desc.description = "Motor 1 max speed in quad pulses/sec (for PID scaling, not a limit)";
+  m1_qpps_desc.integer_range.resize(1);
+  m1_qpps_desc.integer_range[0].from_value = 0;
+  m1_qpps_desc.integer_range[0].to_value = 1000000;
+  m1_qpps_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("m1_qpps", 0, m1_qpps_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m2_p_desc;
+  m2_p_desc.description = "Motor 2 (right) PID proportional gain";
+  m2_p_desc.floating_point_range.resize(1);
+  m2_p_desc.floating_point_range[0].from_value = 0.0;
+  m2_p_desc.floating_point_range[0].to_value = 100000.0;
+  m2_p_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_p", 0.0, m2_p_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m2_i_desc;
+  m2_i_desc.description = "Motor 2 (right) PID integral gain";
+  m2_i_desc.floating_point_range.resize(1);
+  m2_i_desc.floating_point_range[0].from_value = 0.0;
+  m2_i_desc.floating_point_range[0].to_value = 100000.0;
+  m2_i_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_i", 0.0, m2_i_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m2_d_desc;
+  m2_d_desc.description = "Motor 2 (right) PID derivative gain";
+  m2_d_desc.floating_point_range.resize(1);
+  m2_d_desc.floating_point_range[0].from_value = 0.0;
+  m2_d_desc.floating_point_range[0].to_value = 100000.0;
+  m2_d_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_d", 0.0, m2_d_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m2_qpps_desc;
+  m2_qpps_desc.description = "Motor 2 max speed in quad pulses/sec (for PID scaling, not a limit)";
+  m2_qpps_desc.integer_range.resize(1);
+  m2_qpps_desc.integer_range[0].from_value = 0;
+  m2_qpps_desc.integer_range[0].to_value = 1000000;
+  m2_qpps_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("m2_qpps", 0, m2_qpps_desc);
+  
+  // 4. Motion Limits (Runtime changeable)
+  rcl_interfaces::msg::ParameterDescriptor max_linear_velocity_desc;
+  max_linear_velocity_desc.description = "Maximum forward/backward velocity (m/s)";
+  max_linear_velocity_desc.floating_point_range.resize(1);
+  max_linear_velocity_desc.floating_point_range[0].from_value = 0.0;
+  max_linear_velocity_desc.floating_point_range[0].to_value = 10.0;
+  max_linear_velocity_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("max_linear_velocity", 0.0, max_linear_velocity_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor max_angular_velocity_desc;
+  max_angular_velocity_desc.description = "Maximum rotation velocity (rad/s)";
+  max_angular_velocity_desc.floating_point_range.resize(1);
+  max_angular_velocity_desc.floating_point_range[0].from_value = 0.0;
+  max_angular_velocity_desc.floating_point_range[0].to_value = 10.0;
+  max_angular_velocity_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("max_angular_velocity", 0.0, max_angular_velocity_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor max_linear_acceleration_desc;
+  max_linear_acceleration_desc.description = "Maximum linear acceleration (m/s^2). Set to 0.0 to use deprecated accel_quad_pulses_per_second instead.";
+  max_linear_acceleration_desc.floating_point_range.resize(1);
+  max_linear_acceleration_desc.floating_point_range[0].from_value = 0.0;
+  max_linear_acceleration_desc.floating_point_range[0].to_value = 20.0;
+  max_linear_acceleration_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("max_linear_acceleration", 0.0, max_linear_acceleration_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor accel_quad_pulses_per_second_desc;
+  accel_quad_pulses_per_second_desc.description = "DEPRECATED: Use max_linear_acceleration instead. Maximum acceleration in quad pulses/sec^2";
+  accel_quad_pulses_per_second_desc.integer_range.resize(1);
+  accel_quad_pulses_per_second_desc.integer_range[0].from_value = 100;
+  accel_quad_pulses_per_second_desc.integer_range[0].to_value = 100000;
+  accel_quad_pulses_per_second_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("accel_quad_pulses_per_second", 600, accel_quad_pulses_per_second_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m1_max_current_desc;
+  m1_max_current_desc.description = "Motor 1 current limit (trip threshold) in Amps";
+  m1_max_current_desc.floating_point_range.resize(1);
+  m1_max_current_desc.floating_point_range[0].from_value = 0.0;
+  m1_max_current_desc.floating_point_range[0].to_value = 50.0;
+  m1_max_current_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_max_current", 0.0, m1_max_current_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor m2_max_current_desc;
+  m2_max_current_desc.description = "Motor 2 current limit (trip threshold) in Amps";
+  m2_max_current_desc.floating_point_range.resize(1);
+  m2_max_current_desc.floating_point_range[0].from_value = 0.0;
+  m2_max_current_desc.floating_point_range[0].to_value = 50.0;
+  m2_max_current_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_max_current", 0.0, m2_max_current_desc);
+  
+  // 5. Current Protection (Runtime changeable)
   rcl_interfaces::msg::ParameterDescriptor filter_desc;
-  filter_desc.description = "Time window for averaging motor current readings. 0.0=instantaneous (legacy), 0.1-10.0=averaged";
+  filter_desc.description = "Time window for averaging current readings in seconds. 0.0=instantaneous, >0.0=filtered";
+  filter_desc.floating_point_range.resize(1);
+  filter_desc.floating_point_range[0].from_value = 0.0;
+  filter_desc.floating_point_range[0].to_value = 10.0;
+  filter_desc.floating_point_range[0].step = 0.0;
   node_->declare_parameter<float>("current_filter_window_seconds", 1.0, filter_desc);
   
   rcl_interfaces::msg::ParameterDescriptor recovery_desc;
-  recovery_desc.description = "Seconds of zero cmd_vel required before auto-recovery from over-current. 0.0=disabled";
+  recovery_desc.description = "Seconds of zero cmd_vel before auto-recovery from over-current. 0.0=no auto-recovery";
+  recovery_desc.floating_point_range.resize(1);
+  recovery_desc.floating_point_range[0].from_value = 0.0;
+  recovery_desc.floating_point_range[0].to_value = 60.0;
+  recovery_desc.floating_point_range[0].step = 0.0;
   node_->declare_parameter<float>("recovery_timeout_seconds", 5.0, recovery_desc);
+  
+  // 6. Safety (Runtime changeable)
+  rcl_interfaces::msg::ParameterDescriptor watchdog_desc;
+  watchdog_desc.description = "Watchdog timeout - stops motors if no cmd_vel received (seconds)";
+  watchdog_desc.floating_point_range.resize(1);
+  watchdog_desc.floating_point_range[0].from_value = 0.0;
+  watchdog_desc.floating_point_range[0].to_value = 5.0;
+  watchdog_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("max_seconds_uncommanded_travel", 0.0, watchdog_desc);
+  
+  // 7. Publishing & Topics (Read-Only, require restart)
+  rcl_interfaces::msg::ParameterDescriptor publish_joint_states_desc;
+  publish_joint_states_desc.description = "Publish wheel joint states for robot_state_publisher";
+  publish_joint_states_desc.read_only = true;
+  node_->declare_parameter<bool>("publish_joint_states", true, publish_joint_states_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor publish_odom_desc;
+  publish_odom_desc.description = "Publish odometry on /odom topic";
+  publish_odom_desc.read_only = true;
+  node_->declare_parameter<bool>("publish_odom", true, publish_odom_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor roboclaw_status_topic_desc;
+  roboclaw_status_topic_desc.description = "Topic name for RoboClaw status messages";
+  roboclaw_status_topic_desc.read_only = true;
+  node_->declare_parameter<std::string>("roboclaw_status_topic", "roboclaw_status", roboclaw_status_topic_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor sensor_update_rate_desc;
+  sensor_update_rate_desc.description = "Rate for reading encoders and publishing status (Hz)";
+  sensor_update_rate_desc.read_only = true;
+  sensor_update_rate_desc.floating_point_range.resize(1);
+  sensor_update_rate_desc.floating_point_range[0].from_value = 1.0;
+  sensor_update_rate_desc.floating_point_range[0].to_value = 100.0;
+  sensor_update_rate_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("sensor_update_rate", 20.0, sensor_update_rate_desc);
+  
+  // 8. Debug & Logging (Runtime changeable)
+  rcl_interfaces::msg::ParameterDescriptor do_debug_desc;
+  do_debug_desc.description = "Enable protocol-level debug logging (command packets)";
+  node_->declare_parameter<bool>("do_debug", false, do_debug_desc);
+  
+  rcl_interfaces::msg::ParameterDescriptor do_low_level_debug_desc;
+  do_low_level_debug_desc.description = "Enable byte-level serial debug logging (every read/write) - WARNING: massive output";
+  node_->declare_parameter<bool>("do_low_level_debug", false, do_low_level_debug_desc);
 }
 
 void MotorDriver::initializeParameters() {
@@ -80,8 +295,10 @@ void MotorDriver::initializeParameters() {
   node_->get_parameter("m2_max_current", m2_max_current_);
   node_->get_parameter("max_angular_velocity", max_angular_velocity_);
   node_->get_parameter("max_linear_velocity", max_linear_velocity_);
+  node_->get_parameter("max_linear_acceleration", max_linear_acceleration_);
   node_->get_parameter("max_seconds_uncommanded_travel",
                       max_seconds_uncommanded_travel_);
+  node_->get_parameter("meters_per_quad_pulse", meters_per_quad_pulse_);
   node_->get_parameter("publish_joint_states", publish_joint_states_);
   node_->get_parameter("publish_odom", publish_odom_);
   node_->get_parameter("quad_pulses_per_meter", quad_pulses_per_meter_);
@@ -93,6 +310,24 @@ void MotorDriver::initializeParameters() {
   node_->get_parameter("wheel_separation", wheel_separation_);
   node_->get_parameter("current_filter_window_seconds", current_filter_window_seconds_);
   node_->get_parameter("recovery_timeout_seconds", recovery_timeout_seconds_);
+  
+  // Handle backward compatibility and compute derived values
+  if (meters_per_quad_pulse_ == 0.0 && quad_pulses_per_meter_ > 0) {
+    // Convert from deprecated quad_pulses_per_meter
+    meters_per_quad_pulse_ = 1.0 / quad_pulses_per_meter_;
+    RCUTILS_LOG_WARN("Using deprecated quad_pulses_per_meter parameter. Please use meters_per_quad_pulse instead.");
+  }
+  
+  if (max_linear_acceleration_ == 0.0 && accel_quad_pulses_per_second_ > 0 && meters_per_quad_pulse_ > 0.0) {
+    // Convert from deprecated accel_quad_pulses_per_second
+    max_linear_acceleration_ = accel_quad_pulses_per_second_ * meters_per_quad_pulse_;
+    RCUTILS_LOG_WARN("Using deprecated accel_quad_pulses_per_second parameter. Please use max_linear_acceleration instead.");
+  }
+  
+  // Convert max_linear_acceleration back to quad pulses for RoboClaw commands
+  if (max_linear_acceleration_ > 0.0 && meters_per_quad_pulse_ > 0.0) {
+    accel_quad_pulses_per_second_ = static_cast<int>(max_linear_acceleration_ / meters_per_quad_pulse_);
+  }
 
   logParameters();
 }
@@ -169,10 +404,11 @@ void MotorDriver::cmdVelCallback(
       const double m2_desired_velocity =
           x_velocity + (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
 
+      // Convert m/s to quad pulses per second
       const int32_t m1_quad_pulses_per_second =
-          m1_desired_velocity * quad_pulses_per_meter_;
+          m1_desired_velocity / meters_per_quad_pulse_;
       const int32_t m2_quad_pulses_per_second =
-          m2_desired_velocity * quad_pulses_per_meter_;
+          m2_desired_velocity / meters_per_quad_pulse_;
       
       // Use immediate speed+accel command (no distance buffering)
       RoboClaw::singleton()->doMixedSpeedAccel(
@@ -302,10 +538,11 @@ void MotorDriver::publisherThread() {
         double dt = (now - last_time).seconds();
         last_time = now;
 
+        // Get velocities in quad pulses per second and convert to m/s
         float linear_velocity_x =
-            RoboClaw::singleton()->getVelocity(RoboClaw::kM1) * 1.0;
+            RoboClaw::singleton()->getVelocity(RoboClaw::kM1) * g_singleton->meters_per_quad_pulse_;
         float linear_velocity_y =
-            RoboClaw::singleton()->getVelocity(RoboClaw::kM2) * 1.0;
+            RoboClaw::singleton()->getVelocity(RoboClaw::kM2) * g_singleton->meters_per_quad_pulse_;
         float angular_velocity_z = (linear_velocity_x - linear_velocity_y) /
                                    g_singleton->wheel_separation_;
 
@@ -385,7 +622,181 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
   result.successful = true;
   
   for (const auto &param : parameters) {
-    if (param.get_name() == "current_filter_window_seconds") {
+    const std::string &name = param.get_name();
+    
+    // PID Parameters (8 params) - Runtime changeable
+    if (name == "m1_p") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 100000.0) {
+        m1_p_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_p to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m1_p must be between 0.0 and 100000.0";
+        return result;
+      }
+    } else if (name == "m1_i") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 100000.0) {
+        m1_i_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_i to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m1_i must be between 0.0 and 100000.0";
+        return result;
+      }
+    } else if (name == "m1_d") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 100000.0) {
+        m1_d_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_d to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m1_d must be between 0.0 and 100000.0";
+        return result;
+      }
+    } else if (name == "m1_qpps") {
+      int new_value = param.as_int();
+      if (new_value >= 0 && new_value <= 1000000) {
+        m1_qpps_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_qpps to %d", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m1_qpps must be between 0 and 1000000";
+        return result;
+      }
+    } else if (name == "m2_p") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 100000.0) {
+        m2_p_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_p to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m2_p must be between 0.0 and 100000.0";
+        return result;
+      }
+    } else if (name == "m2_i") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 100000.0) {
+        m2_i_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_i to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m2_i must be between 0.0 and 100000.0";
+        return result;
+      }
+    } else if (name == "m2_d") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 100000.0) {
+        m2_d_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_d to %.2f", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m2_d must be between 0.0 and 100000.0";
+        return result;
+      }
+    } else if (name == "m2_qpps") {
+      int new_value = param.as_int();
+      if (new_value >= 0 && new_value <= 1000000) {
+        m2_qpps_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_qpps to %d", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m2_qpps must be between 0 and 1000000";
+        return result;
+      }
+    }
+    
+    // Motion Limits (5 params) - Runtime changeable
+    else if (name == "max_linear_velocity") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 10.0) {
+        max_linear_velocity_ = new_value;
+        RCLCPP_INFO(node_->get_logger(), "Updated max_linear_velocity to %.2f m/s", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "max_linear_velocity must be between 0.0 and 10.0";
+        return result;
+      }
+    } else if (name == "max_angular_velocity") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 10.0) {
+        max_angular_velocity_ = new_value;
+        RCLCPP_INFO(node_->get_logger(), "Updated max_angular_velocity to %.2f rad/s", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "max_angular_velocity must be between 0.0 and 10.0";
+        return result;
+      }
+    } else if (name == "max_linear_acceleration") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 20.0) {
+        max_linear_acceleration_ = new_value;
+        // Update the derived accel_quad_pulses_per_second value
+        if (meters_per_quad_pulse_ > 0.0) {
+          accel_quad_pulses_per_second_ = static_cast<int>(new_value / meters_per_quad_pulse_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated max_linear_acceleration to %.2f m/s^2 (%d qpps)", 
+                    new_value, accel_quad_pulses_per_second_);
+      } else {
+        result.successful = false;
+        result.reason = "max_linear_acceleration must be between 0.0 and 20.0";
+        return result;
+      }
+    } else if (name == "m1_max_current") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 50.0) {
+        m1_max_current_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setMaxCurrents(m1_max_current_, m2_max_current_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_max_current to %.2f A", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m1_max_current must be between 0.0 and 50.0";
+        return result;
+      }
+    } else if (name == "m2_max_current") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 50.0) {
+        m2_max_current_ = new_value;
+        if (RoboClaw::singleton() != nullptr) {
+          RoboClaw::singleton()->setMaxCurrents(m1_max_current_, m2_max_current_);
+        }
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_max_current to %.2f A", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "m2_max_current must be between 0.0 and 50.0";
+        return result;
+      }
+    }
+    
+    // Current Protection (2 params) - Runtime changeable
+    else if (name == "current_filter_window_seconds") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 10.0) {
         current_filter_window_seconds_ = new_value;
@@ -393,13 +804,13 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
           RoboClaw::singleton()->setCurrentProtectionParams(
               current_filter_window_seconds_, recovery_timeout_seconds_, sensor_update_rate_);
         }
-        RCUTILS_LOG_INFO("[MotorDriver] Updated current_filter_window_seconds to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated current_filter_window_seconds to %.2f s", new_value);
       } else {
         result.successful = false;
         result.reason = "current_filter_window_seconds must be between 0.0 and 10.0";
         return result;
       }
-    } else if (param.get_name() == "recovery_timeout_seconds") {
+    } else if (name == "recovery_timeout_seconds") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 60.0) {
         recovery_timeout_seconds_ = new_value;
@@ -407,12 +818,59 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
           RoboClaw::singleton()->setCurrentProtectionParams(
               current_filter_window_seconds_, recovery_timeout_seconds_, sensor_update_rate_);
         }
-        RCUTILS_LOG_INFO("[MotorDriver] Updated recovery_timeout_seconds to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated recovery_timeout_seconds to %.2f s", new_value);
       } else {
         result.successful = false;
         result.reason = "recovery_timeout_seconds must be between 0.0 and 60.0";
         return result;
       }
+    }
+    
+    // Safety (1 param) - Runtime changeable
+    else if (name == "max_seconds_uncommanded_travel") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 5.0) {
+        max_seconds_uncommanded_travel_ = new_value;
+        RCLCPP_INFO(node_->get_logger(), "Updated max_seconds_uncommanded_travel to %.2f s", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "max_seconds_uncommanded_travel must be between 0.0 and 5.0";
+        return result;
+      }
+    }
+    
+    // Debug & Logging (2 params) - Runtime changeable
+    else if (name == "do_debug") {
+      do_debug_ = param.as_bool();
+      if (RoboClaw::singleton() != nullptr) {
+        RoboClaw::singleton()->setDoDebug(do_debug_);
+      }
+      RCLCPP_INFO(node_->get_logger(), "Updated do_debug to %s", do_debug_ ? "true" : "false");
+    } else if (name == "do_low_level_debug") {
+      do_low_level_debug_ = param.as_bool();
+      if (RoboClaw::singleton() != nullptr) {
+        RoboClaw::singleton()->setDoLowLevelDebug(do_low_level_debug_);
+      }
+      RCLCPP_INFO(node_->get_logger(), "Updated do_low_level_debug to %s", do_low_level_debug_ ? "true" : "false");
+    }
+    
+    // Read-only parameters - Reject runtime changes
+    else if (name == "device_name" || name == "baud_rate" || name == "device_port" || 
+             name == "serial_timeout" || name == "wheel_separation" || 
+             name == "meters_per_quad_pulse" || name == "wheel_radius" || 
+             name == "quad_pulses_per_meter" || name == "quad_pulses_per_revolution" ||
+             name == "publish_joint_states" || name == "publish_odom" || 
+             name == "roboclaw_status_topic" || name == "sensor_update_rate") {
+      result.successful = false;
+      result.reason = "Parameter '" + name + "' is read-only and requires node restart to change";
+      return result;
+    }
+    
+    // Deprecated parameters that should not be changed at runtime
+    else if (name == "accel_quad_pulses_per_second") {
+      result.successful = false;
+      result.reason = "Parameter 'accel_quad_pulses_per_second' is deprecated. Use 'max_linear_acceleration' instead";
+      return result;
     }
   }
   

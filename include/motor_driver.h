@@ -50,7 +50,9 @@ class MotorDriver {
   float m2_max_current_;
   float max_angular_velocity_;
   float max_linear_velocity_;
+  float max_linear_acceleration_;  // NEW: SI unit for acceleration (m/s^2)
   float max_seconds_uncommanded_travel_;
+  float meters_per_quad_pulse_;  // NEW: SI unit calibration (replaces wheel_radius + pulses_per_meter)
   bool publish_joint_states_;
   bool publish_odom_;
   int quad_pulses_per_meter_;

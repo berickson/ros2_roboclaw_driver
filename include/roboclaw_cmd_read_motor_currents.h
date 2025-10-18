@@ -58,6 +58,14 @@ class CmdReadMotorCurrents : public Cmd {
         // Clear alarm flags when current is normal
         roboclaw_.motorAlarms_ &= ~(RoboClaw::kM1_OVER_CURRENT_ALARM | 
                                     RoboClaw::kM2_OVER_CURRENT_ALARM);
+        // Debug: periodically log current vs limits
+        static int log_counter = 0;
+        if (roboclaw_.do_debug_ && (++log_counter % 50) == 0) {
+          RCUTILS_LOG_INFO(
+              "[RoboClaw::CmdReadMotorCurrents] M1: %.2fA/%.2fA, M2: %.2fA/%.2fA",
+              roboclaw_.m1_current_average_, roboclaw_.maxM1Current_,
+              roboclaw_.m2_current_average_, roboclaw_.maxM2Current_);
+        }
       }
     } else if (roboclaw_.current_protection_state_ == RoboClaw::OVER_CURRENT_WARNING) {
       // Check if we can start recovery (no non-zero cmd_vel for recovery timeout)

@@ -61,6 +61,9 @@ RoboClaw::RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
       connection_state_(CONNECTED),
       consecutive_errors_(0),
       error_threshold_(3),
+      total_messages_(0),
+      total_errors_(0),
+      cached_firmware_version_(""),
       debug_log_(this) {
   // Initialize timestamps - set last_nonzero_cmd_vel_time_ far in the past
   // so recovery can start immediately after over-current
@@ -68,8 +71,9 @@ RoboClaw::RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
   last_successful_communication_ = std::chrono::steady_clock::now();
   
   openPort();
+  cached_firmware_version_ = getVersion();
   RCUTILS_LOG_INFO("[RoboClaw::RoboClaw] RoboClaw software version: %s",
-                   getVersion().c_str());
+                   cached_firmware_version_.c_str());
   try {
     setSerialTimeout(serial_timeout);
     RCUTILS_LOG_INFO("[RoboClaw::RoboClaw] Serial timeout set to: %f seconds",
@@ -349,6 +353,10 @@ std::string RoboClaw::getVersion() {
   CmdReadFirmwareVersion command(*this, version);
   command.execute();
   return version;
+}
+
+std::string RoboClaw::getCachedFirmwareVersion() const {
+  return cached_firmware_version_;
 }
 
 void RoboClaw::openPort() {
@@ -897,6 +905,7 @@ void RoboClaw::setConnectionState(ConnectionState new_state, const char* reason)
 
 void RoboClaw::recordSuccessfulCommunication() {
   last_successful_communication_ = std::chrono::steady_clock::now();
+  total_messages_++;
   
   if (consecutive_errors_ > 0) {
     consecutive_errors_ = 0;
@@ -909,6 +918,8 @@ void RoboClaw::recordSuccessfulCommunication() {
 
 void RoboClaw::recordFailedCommunication() {
   consecutive_errors_++;
+  total_messages_++;
+  total_errors_++;
   
   if (consecutive_errors_ >= error_threshold_ && connection_state_ == CONNECTED) {
     setConnectionState(DISCONNECTED, "Too many consecutive errors");

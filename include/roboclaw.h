@@ -209,9 +209,50 @@ class RoboClaw {
   // Get connection state
   ConnectionState getConnectionState() const { return connection_state_; }
 
+  // Get smoothed motor currents (filtered over filter_window_seconds)
+  float getM1CurrentSmoothed() const { return m1_current_average_; }
+  float getM2CurrentSmoothed() const { return m2_current_average_; }
+
+  // Get communication statistics
+  uint32_t getConsecutiveErrors() const { return consecutive_errors_; }
+  uint32_t getTotalMessages() const { return total_messages_; }
+  uint32_t getTotalErrors() const { return total_errors_; }
+  std::chrono::steady_clock::time_point getLastSuccessfulCommunication() const { 
+    return last_successful_communication_; 
+  }
+
+  // Get firmware version (cached, doesn't trigger command)
+  std::string getCachedFirmwareVersion() const;
+
+  // Get time since last non-zero cmd_vel (for recovery monitoring)
+  std::chrono::steady_clock::time_point getLastNonzeroCmdVelTime() const {
+    return last_nonzero_cmd_vel_time_;
+  }
+
+  // Get sensor timing information
+  std::chrono::system_clock::time_point getLastSensorReadTime() const {
+    return g_sensor_value_group_.last_sensor_read_time_;
+  }
+
   // Record successful/failed communication for connection state management
   void recordSuccessfulCommunication();
   void recordFailedCommunication();
+
+  // Set debug flags (for runtime parameter changes)
+  void setDoDebug(bool value) { do_debug_ = value; }
+  void setDoLowLevelDebug(bool value) { do_low_level_debug_ = value; }
+
+  // Set current limits (for runtime parameter changes)
+  void setMaxCurrents(float m1_max, float m2_max) { 
+    maxM1Current_ = m1_max; 
+    maxM2Current_ = m2_max;
+    RCUTILS_LOG_INFO("[RoboClaw::setMaxCurrents] Updated limits: M1=%.2fA, M2=%.2fA", 
+                     m1_max, m2_max);
+  }
+
+  // Set the PID for motors (for runtime parameter changes)
+  void setM1PID(float p, float i, float d, uint32_t qpps);
+  void setM2PID(float p, float i, float d, uint32_t qpps);
 
  protected:
   // Write a stream of bytes to the device.
@@ -345,6 +386,9 @@ class RoboClaw {
   uint32_t consecutive_errors_;
   uint32_t error_threshold_;  // errors before marking disconnected
   std::chrono::steady_clock::time_point last_successful_communication_;
+  uint32_t total_messages_;   // Lifetime count of all commands sent
+  uint32_t total_errors_;     // Lifetime count of all failed commands
+  std::string cached_firmware_version_;  // Firmware version cached at startup
 
   // Methods for current protection
   void addCurrentSample(float m1_current, float m2_current);
@@ -377,12 +421,6 @@ class RoboClaw {
   bool resetEncoders(
       ros2_roboclaw_driver::srv::ResetEncoders::Request &request,
       ros2_roboclaw_driver::srv::ResetEncoders::Response &response);
-
-  // Set the PID for motor M1.
-  void setM1PID(float p, float i, float d, uint32_t qpps);
-
-  // Set the PID for motor M1.
-  void setM2PID(float p, float i, float d, uint32_t qpps);
 
   // Update the running CRC result.
   void updateCrc(uint16_t &crc, uint8_t data);
