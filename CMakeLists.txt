@@ -19,6 +19,8 @@ add_compile_options(-g)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
+find_package(diagnostic_updater REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs)
 find_package(rclcpp REQUIRED)
@@ -27,6 +29,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 include_directories(
+  ${diagnostic_msgs_INCLUDE_DIRS}
+  ${diagnostic_updater_INCLUDE_DIRS}
   ${geometry_msgs_INCLUDE_DIRS}
   ${nav_msgs_INCLUDE_DIRS}
   ${rclcpp_INCLUDE_DIRS}
@@ -61,6 +65,8 @@ add_executable(
 ament_target_dependencies(
   ros2_roboclaw_driver_node
   rclcpp
+  diagnostic_msgs
+  diagnostic_updater
   geometry_msgs
   nav_msgs
   sensor_msgs

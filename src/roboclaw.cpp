@@ -58,10 +58,14 @@ RoboClaw::RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
       m1_current_average_(0.0),
       m2_current_average_(0.0),
       max_buffer_size_(0),
+      connection_state_(CONNECTED),
+      consecutive_errors_(0),
+      error_threshold_(3),
       debug_log_(this) {
   // Initialize timestamps - set last_nonzero_cmd_vel_time_ far in the past
   // so recovery can start immediately after over-current
   last_nonzero_cmd_vel_time_ = std::chrono::steady_clock::now() - std::chrono::hours(1);
+  last_successful_communication_ = std::chrono::steady_clock::now();
   
   openPort();
   RCUTILS_LOG_INFO("[RoboClaw::RoboClaw] RoboClaw software version: %s",
@@ -356,6 +360,8 @@ void RoboClaw::openPort() {
         "[RoboClaw::openPort] Unable to open USB port: %s, errno: (%d) "
         "%s",
         device_name_.c_str(), errno, strerror(errno));
+    // Immediately mark as disconnected when we can't open the port
+    setConnectionState(DISCONNECTED, "Cannot open USB port");
     throw new TRoboClawException(
         "[RoboClaw::openPort] Unable to open USB port");
   }
@@ -513,6 +519,30 @@ uint8_t RoboClaw::readByteWithTimeout2() {
 
 void RoboClaw::readSensorGroup() {
   if (singleton() != nullptr) {
+    // If disconnected, periodically try to reconnect (once every 5 seconds)
+    if (connection_state_ == DISCONNECTED) {
+      auto now = std::chrono::steady_clock::now();
+      static auto last_reconnect_attempt = std::chrono::steady_clock::now();
+      auto time_since_last_attempt = 
+          std::chrono::duration_cast<std::chrono::seconds>(now - last_reconnect_attempt).count();
+      
+      if (time_since_last_attempt >= 5) {
+        last_reconnect_attempt = now;
+        RCUTILS_LOG_INFO("[RoboClaw::readSensorGroup] Attempting to reconnect...");
+        if (device_port_ >= 0) {
+          close(device_port_);
+          device_port_ = -1;
+        }
+        // openPort() will throw if it fails, and set DISCONNECTED state
+        // The exception will propagate up and prevent sensor reading
+        openPort();
+        // If we get here, port opened successfully, fall through to read sensors
+      } else {
+        // Don't spam reconnection attempts
+        throw new TRoboClawException("[RoboClaw::readSensorGroup] Device disconnected");
+      }
+    }
+    
     TPIDQ m1_read_velocity_pidq_result;
     TPIDQ m2_read_velocity_pidq_result;
     CmdReadMotorVelocityPIDQ cmd_m1_read_motor_velocity_pidq(
@@ -550,6 +580,16 @@ void RoboClaw::readSensorGroup() {
     cmd_read_status.execute();
     g_sensor_value_group_.error_status = status;
     g_sensor_value_group_.error_string = singleton()->getErrorString(status);
+    
+    // Append connection state if disconnected
+    if (connection_state_ == DISCONNECTED) {
+      if (g_sensor_value_group_.error_string.empty() || 
+          g_sensor_value_group_.error_string == "normal") {
+        g_sensor_value_group_.error_string = "[DISCONNECTED] ";
+      } else {
+        g_sensor_value_group_.error_string += "[DISCONNECTED] ";
+      }
+    }
     
     // Append current protection status if not normal
     if (current_protection_state_ != NORMAL) {
@@ -598,7 +638,17 @@ bool RoboClaw::resetEncoders(
 }
 
 void RoboClaw::restartPort() {
-  close(device_port_);
+  if (device_port_ >= 0) {
+    close(device_port_);
+    device_port_ = -1;
+  }
+  
+  // Don't try to reopen if we're already marked as disconnected
+  // This prevents spam when the device is unplugged
+  if (connection_state_ == DISCONNECTED) {
+    throw new TRoboClawException("[RoboClaw::restartPort] Device is disconnected");
+  }
+  
   usleep(200000);
   openPort();
 }
@@ -830,5 +880,37 @@ void RoboClaw::transitionState(OverCurrentState new_state, const char* reason) {
       // Clear alarm flags when returning to normal
       motorAlarms_ &= ~(kM1_OVER_CURRENT_ALARM | kM2_OVER_CURRENT_ALARM);
     }
+  }
+}
+
+// Connection state management methods
+
+void RoboClaw::setConnectionState(ConnectionState new_state, const char* reason) {
+  if (new_state != connection_state_) {
+    const char* state_names[] = {"CONNECTED", "DISCONNECTED"};
+    RCUTILS_LOG_WARN("[RoboClaw::ConnectionState] State: %s -> %s (%s)",
+                     state_names[connection_state_],
+                     state_names[new_state], reason);
+    connection_state_ = new_state;
+  }
+}
+
+void RoboClaw::recordSuccessfulCommunication() {
+  last_successful_communication_ = std::chrono::steady_clock::now();
+  
+  if (consecutive_errors_ > 0) {
+    consecutive_errors_ = 0;
+  }
+  
+  if (connection_state_ == DISCONNECTED) {
+    setConnectionState(CONNECTED, "Communication restored");
+  }
+}
+
+void RoboClaw::recordFailedCommunication() {
+  consecutive_errors_++;
+  
+  if (consecutive_errors_ >= error_threshold_ && connection_state_ == CONNECTED) {
+    setConnectionState(DISCONNECTED, "Too many consecutive errors");
   }
 }

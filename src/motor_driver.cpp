@@ -137,6 +137,12 @@ void MotorDriver::logParameters() const {
 void MotorDriver::cmdVelCallback(
     const geometry_msgs::msg::Twist::SharedPtr msg) {
   if (RoboClaw::singleton() != nullptr) {
+    // Check connection state first
+    if (RoboClaw::singleton()->getConnectionState() == RoboClaw::DISCONNECTED) {
+      // Don't send commands when disconnected
+      return;
+    }
+    
     double x_velocity =
         std::min(std::max((float)msg->linear.x, -max_linear_velocity_),
                  max_linear_velocity_);
@@ -258,13 +264,15 @@ void MotorDriver::publisherThread() {
   rclcpp::WallRate loop_rate(sensor_update_rate_);
   rclcpp::Time now = clock->now();
   rclcpp::Time last_time = now;
+  bool logged_disconnection = false;  // Only log disconnection once
 
   while (rclcpp::ok()) {
     loop_rate.sleep();
     if (RoboClaw::singleton() != nullptr) {
-      RoboClaw::singleton()->readSensorGroup();
+      try {
+        RoboClaw::singleton()->readSensorGroup();
 
-      nav_msgs::msg::Odometry odometry_msg;
+        nav_msgs::msg::Odometry odometry_msg;
       sensor_msgs::msg::JointState joint_state_msg;
 
       odometry_msg.header.stamp = clock->now();
@@ -348,6 +356,24 @@ void MotorDriver::publisherThread() {
         odometry_msg.twist.twist.angular.y = 0.0;
         odometry_msg.twist.twist.angular.z = angular_velocity_z;
         g_singleton->odom_publisher_->publish(odometry_msg);
+      }
+      
+      // If we successfully read sensors, reset the disconnection log flag
+      logged_disconnection = false;
+      
+      } catch (RoboClaw::TRoboClawException *e) {
+        // Only log once when we become disconnected, not on every attempt
+        if (!logged_disconnection) {
+          RCUTILS_LOG_WARN("[MotorDriver::publisherThread] Exception reading sensors: %s", e->what());
+          logged_disconnection = true;
+        }
+        // Continue running - don't let exception terminate thread
+      } catch (...) {
+        if (!logged_disconnection) {
+          RCUTILS_LOG_WARN("[MotorDriver::publisherThread] Uncaught exception reading sensors");
+          logged_disconnection = true;
+        }
+        // Continue running - don't let exception terminate thread
       }
     }
   }

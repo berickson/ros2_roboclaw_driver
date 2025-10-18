@@ -50,6 +50,12 @@ class RoboClaw {
     RECOVERING             // Attempting to resume operation (future use)
   };
 
+  // Connection state for serial communication
+  enum ConnectionState {
+    CONNECTED,     // Normal serial communication
+    DISCONNECTED   // Serial communication failed
+  };
+
   // A convenience struction to pass around configuration information.
   typedef struct {
     float p;
@@ -200,6 +206,13 @@ class RoboClaw {
   // Get current protection state (for debugging/monitoring)
   OverCurrentState getCurrentProtectionState() const { return current_protection_state_; }
 
+  // Get connection state
+  ConnectionState getConnectionState() const { return connection_state_; }
+
+  // Record successful/failed communication for connection state management
+  void recordSuccessfulCommunication();
+  void recordFailedCommunication();
+
  protected:
   // Write a stream of bytes to the device.
   void writeN2(bool sendCRC, uint8_t cnt, ...);
@@ -326,12 +339,21 @@ class RoboClaw {
   float m1_current_average_;
   float m2_current_average_;
   size_t max_buffer_size_;
+  
+  // Connection state management
+  ConnectionState connection_state_;
+  uint32_t consecutive_errors_;
+  uint32_t error_threshold_;  // errors before marking disconnected
+  std::chrono::steady_clock::time_point last_successful_communication_;
 
   // Methods for current protection
   void addCurrentSample(float m1_current, float m2_current);
   void updateBufferSize();
   float calculateAverage(const std::deque<float>& history) const;
   void transitionState(OverCurrentState new_state, const char* reason);
+
+  // Methods for connection state management
+  void setConnectionState(ConnectionState new_state, const char* reason);
 
   // Get velocity (speed) result from the RoboClaw controller.
   int32_t getVelocityResult(uint8_t command);

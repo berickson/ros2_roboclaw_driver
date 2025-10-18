@@ -24,10 +24,12 @@ class Cmd {
       }
       // Mutex released here, now safe to call process() which may send other commands
       process();
+      roboclaw_.recordSuccessfulCommunication();
       return;
     }
 
     roboclaw_.debug_log_.showLog();
+    roboclaw_.recordFailedCommunication();
     RCUTILS_LOG_ERROR("[RoboClaw::Cmd::execute] RETRY COUNT EXCEEDED");
     throw new RoboClaw::TRoboClawException(
         "[RoboClaw::Cmd::execute] RETRY COUNT EXCEEDED");
