@@ -10,24 +10,18 @@ class CmdReadMotorCurrents : public Cmd {
         motorCurrents_(motorCurrents) {}
   
   void send() override {
-    try {
-      roboclaw_.appendToWriteLog("ReadMotorCurrents: WROTE: ");
+    roboclaw_.appendToWriteLog("ReadMotorCurrents: WROTE: ");
 
-      unsigned long currentPair =
-          roboclaw_.getUlongCommandResult2(RoboClaw::GETCURRENTS);
-      motorCurrents_.m1Current = ((int16_t)(currentPair >> 16)) * 0.010;
-      motorCurrents_.m2Current = ((int16_t)(currentPair & 0xFFFF)) * 0.010;
-      roboclaw_.appendToReadLog(", RESULT m1 current: %3.4f, m2 current: %3.4f",
-                                motorCurrents_.m1Current,
-                                motorCurrents_.m2Current);
+    unsigned long currentPair =
+        roboclaw_.getUlongCommandResult2(RoboClaw::GETCURRENTS);
+    motorCurrents_.m1Current = ((int16_t)(currentPair >> 16)) * 0.010;
+    motorCurrents_.m2Current = ((int16_t)(currentPair & 0xFFFF)) * 0.010;
+    roboclaw_.appendToReadLog(", RESULT m1 current: %3.4f, m2 current: %3.4f",
+                              motorCurrents_.m1Current,
+                              motorCurrents_.m2Current);
 
-      // Add current samples to history and calculate averages
-      roboclaw_.addCurrentSample(motorCurrents_.m1Current, motorCurrents_.m2Current);
-    } catch (...) {
-      RCUTILS_LOG_ERROR(
-          "[RoboClaw::CmdReadMotorCurrents] Uncaught exception in send() !!!");
-      throw;
-    }
+    // Add current samples to history and calculate averages
+    roboclaw_.addCurrentSample(motorCurrents_.m1Current, motorCurrents_.m2Current);
   }
   
   void process() override {

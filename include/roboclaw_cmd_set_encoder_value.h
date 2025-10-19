@@ -11,16 +11,10 @@ class CmdSetEncoderValue : public Cmd {
     roboclaw_.appendToWriteLog(
         "SetEncoderValue: motor: %d (%s) value: %ld, WROTE: ", motor_,
         RoboClaw::motorNames_[motor_], value_);
-    try {
-      roboclaw_.writeN2(true, 6, roboclaw_.portAddress_,
-                        motor_ == RoboClaw::kM1 ? RoboClaw::SETM1ENCODER
-                                                : RoboClaw::SETM2ENCODER,
-                        SetDWORDval(value_));
-      return;
-    } catch (...) {
-      RCUTILS_LOG_ERROR(
-          "[RoboClaw::CmdSetEncoderValue] Uncaught exception !!!");
-    }
+    roboclaw_.writeN2(true, 6, roboclaw_.portAddress_,
+                      motor_ == RoboClaw::kM1 ? RoboClaw::SETM1ENCODER
+                                              : RoboClaw::SETM2ENCODER,
+                      SetDWORDval(value_));
   }
 
  private:

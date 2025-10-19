@@ -80,11 +80,79 @@ class RoboClaw {
     const char *what() const throw() { return s.c_str(); }
   };
 
+  // Communication exception - base for all communication errors
+  struct CommunicationException : public TRoboClawException {
+    CommunicationException(const char *operation, const char *reason, ...) 
+        : TRoboClawException("") {
+      char reason_buffer[200];
+      va_list args;
+      va_start(args, reason);
+      vsnprintf(reason_buffer, sizeof(reason_buffer), reason, args);
+      va_end(args);
+      
+      char buffer[256];
+      snprintf(buffer, sizeof(buffer), "[%s] Communication error: %s", 
+               operation, reason_buffer);
+      s = std::string(buffer);
+    }
+  };
+
+  // Timeout exception - no response within expected time
+  struct TimeoutException : public CommunicationException {
+    int timeout_ms;
+    TimeoutException(const char *operation, int timeout_ms_val)
+        : CommunicationException(operation, "Timeout after %dms", timeout_ms_val),
+          timeout_ms(timeout_ms_val) {}
+  };
+
+  // CRC/checksum validation failed
+  struct CrcException : public CommunicationException {
+    uint16_t expected;
+    uint16_t actual;
+    CrcException(const char *operation, uint16_t exp, uint16_t act)
+        : CommunicationException(operation, "CRC mismatch (expected 0x%04X, got 0x%04X)", exp, act),
+          expected(exp), actual(act) {}
+  };
+
+  // Device not responding or connection lost
+  struct DeviceNotRespondingException : public CommunicationException {
+    DeviceNotRespondingException(const char *operation)
+        : CommunicationException(operation, "Device not responding") {}
+  };
+
+  // Invalid response format or unexpected data
+  struct InvalidResponseException : public CommunicationException {
+    InvalidResponseException(const char *operation, const char *details, ...)
+        : CommunicationException(operation, "") {
+      char details_buffer[200];
+      va_list args;
+      va_start(args, details);
+      vsnprintf(details_buffer, sizeof(details_buffer), details, args);
+      va_end(args);
+      
+      char buffer[256];
+      snprintf(buffer, sizeof(buffer), "[%s] Invalid response: %s", 
+               operation, details_buffer);
+      s = std::string(buffer);
+    }
+  };
+
   // Holds RoboClaw encoder result.
   typedef struct {
     int32_t value;
     uint8_t status;
   } EncodeResult;
+
+  // Error statistics tracking structure
+  struct ErrorStats {
+    uint32_t total_timeouts = 0;
+    uint32_t total_crc_errors = 0;
+    uint32_t total_ack_errors = 0;
+    uint32_t total_device_not_responding = 0;
+    uint32_t total_communication_errors = 0;
+    std::string last_error_message;
+    std::chrono::steady_clock::time_point last_error_time;
+  };
 
   // Constructor.
   RoboClaw(const TPIDQ m1Pid, const TPIDQ m2Pid, float m1MaxCurrent,
@@ -221,6 +289,9 @@ class RoboClaw {
     return last_successful_communication_; 
   }
 
+  // Get error statistics
+  const ErrorStats& getErrorStats() const { return error_stats_; }
+
   // Get firmware version (cached, doesn't trigger command)
   std::string getCachedFirmwareVersion() const;
 
@@ -236,7 +307,8 @@ class RoboClaw {
 
   // Record successful/failed communication for connection state management
   void recordSuccessfulCommunication();
-  void recordFailedCommunication();
+  void recordFailedCommunication(const TRoboClawException& e);
+  void recordError(const TRoboClawException& e);  // Track error stats without affecting connection state
 
   // Set debug flags (for runtime parameter changes)
   void setDoDebug(bool value) { do_debug_ = value; }
@@ -389,6 +461,9 @@ class RoboClaw {
   uint32_t total_messages_;   // Lifetime count of all commands sent
   uint32_t total_errors_;     // Lifetime count of all failed commands
   std::string cached_firmware_version_;  // Firmware version cached at startup
+
+  // Error statistics tracking instance
+  ErrorStats error_stats_;
 
   // Methods for current protection
   void addCurrentSample(float m1_current, float m2_current);

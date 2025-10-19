@@ -8,17 +8,11 @@ class CmdReadMainBatteryVoltage : public Cmd {
       : Cmd(roboclaw, "ReadLMainBatteryVoltage", RoboClaw::kNone),
         voltage_(voltage) {}
   void send() override {
-    try {
-      roboclaw_.appendToWriteLog("ReadLMainBatteryVoltage: WROTE: ");
-      float result =
-          ((float)roboclaw_.get2ByteCommandResult2(RoboClaw::GETMBATT)) / 10.0;
-      voltage_ = result;
-      roboclaw_.appendToReadLog(", RESULT: %f", result);
-      return;
-    } catch (...) {
-      RCUTILS_LOG_ERROR(
-          "[RoboClaw::CmdReadMainBatteryVoltage] Uncaught exception !!!");
-    }
+    roboclaw_.appendToWriteLog("ReadLMainBatteryVoltage: WROTE: ");
+    float result =
+        ((float)roboclaw_.get2ByteCommandResult2(RoboClaw::GETMBATT)) / 10.0;
+    voltage_ = result;
+    roboclaw_.appendToReadLog(", RESULT: %f", result);
   }
 
  private:

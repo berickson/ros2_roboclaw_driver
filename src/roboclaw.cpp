@@ -209,9 +209,7 @@ unsigned short RoboClaw::get2ByteCommandResult2(uint8_t command) {
         "[RoboClaw::get2ByteCommandResult2] invalid CRC expected: "
         "0x%02X, got: 0x%02X",
         crc, responseCrc);
-    throw new TRoboClawException(
-        "[RoboClaw::get2ByteCommandResult2 INVALID CRC");
-    return 0;
+    throw CrcException("get2ByteCommandResult2", crc, responseCrc);
   }
 }
 
@@ -258,9 +256,7 @@ unsigned long RoboClaw::getUlongCommandResult2(uint8_t command) {
       "[RoboClaw::getUlongCommandResult2] Expected CRC of: 0x%02X, but "
       "got: 0x%02X",
       int(crc), int(responseCrc));
-  throw new TRoboClawException(
-      "[RoboClaw::getUlongCommandResult2] INVALID CRC");
-  return 0;
+  throw CrcException("getUlongCommandResult2", crc, responseCrc);
 }
 
 uint32_t RoboClaw::getULongCont2(uint16_t &crc) {
@@ -328,8 +324,7 @@ int32_t RoboClaw::getVelocityResult(uint8_t command) {
       "[RoboClaw::getVelocityResult] Expected CRC of: 0x%02X, but got: "
       "0x%02X",
       int(crc), int(responseCrc));
-  throw new TRoboClawException("[RoboClaw::getVelocityResult] INVALID CRC");
-  return 0;
+  throw CrcException("getVelocityResult", crc, responseCrc);
 }
 
 int32_t RoboClaw::getM1Encoder() {
@@ -370,8 +365,8 @@ void RoboClaw::openPort() {
         device_name_.c_str(), errno, strerror(errno));
     // Immediately mark as disconnected when we can't open the port
     setConnectionState(DISCONNECTED, "Cannot open USB port");
-    throw new TRoboClawException(
-        "[RoboClaw::openPort] Unable to open USB port");
+    throw TRoboClawException(
+        "[RoboClaw::openPort] Unable to open USB port: %s", device_name_.c_str());
   }
 
   // Fetch the current port settings.
@@ -384,7 +379,7 @@ void RoboClaw::openPort() {
         "[RoboClaw::openPort] Unable to get terminal options "
         "(tcgetattr), error: %d: %s",
         errno, strerror(errno));
-    throw new TRoboClawException(
+    throw TRoboClawException(
         "[RoboClaw::openPort] Unable to get terminal options (tcgetattr)");
   }
 
@@ -392,7 +387,7 @@ void RoboClaw::openPort() {
     RCUTILS_LOG_ERROR(
         "[RoboClaw::openPort] Unable to set terminal speed "
         "(cfsetispeed)");
-    throw new TRoboClawException(
+    throw TRoboClawException(
         "[RoboClaw::openPort] Unable to set terminal speed "
         "(cfsetispeed)");
   }
@@ -417,15 +412,15 @@ void RoboClaw::openPort() {
     default:
       RCUTILS_LOG_ERROR("[RoboClaw::openPort] Unsupported baud rate: %u",
                         baud_rate_);
-      throw new TRoboClawException(
-          "[RoboClaw::openPort] Unsupported baud rate");
+      throw TRoboClawException(
+          "[RoboClaw::openPort] Unsupported baud rate: %u", baud_rate_);
   }
 
   if (cfsetispeed(&portOptions, baud) < 0) {
     RCUTILS_LOG_ERROR(
         "[RoboClaw::openPort] Unable to set terminal input speed "
         "(cfsetispeed)");
-    throw new TRoboClawException(
+    throw TRoboClawException(
         "[RoboClaw::openPort] Unable to set terminal input speed "
         "(cfsetispeed)");
   }
@@ -433,7 +428,7 @@ void RoboClaw::openPort() {
     RCUTILS_LOG_ERROR(
         "[RoboClaw::openPort] Unable to set terminal speed "
         "(cfsetospeed)");
-    throw new TRoboClawException(
+    throw TRoboClawException(
         "[RoboClaw::openPort] Unable to set terminal speed "
         "(cfsetospeed)");
   }
@@ -469,7 +464,7 @@ void RoboClaw::openPort() {
     RCUTILS_LOG_ERROR(
         "[RoboClaw::openPort] Unable to set terminal options "
         "(tcsetattr)");
-    throw new TRoboClawException(
+    throw TRoboClawException(
         "[RoboClaw::openPort] Unable to set terminal options "
         "(tcsetattr)");
   }
@@ -482,20 +477,16 @@ uint8_t RoboClaw::readByteWithTimeout2() {
 
   int retval = poll(ufd, 1, 11);
   if (retval < 0) {
-    RCUTILS_LOG_ERROR("[RoboClaw::readByteWithTimeout2 Poll failed (%d) %s",
+    RCUTILS_LOG_ERROR("[RoboClaw::readByteWithTimeout2] Poll failed (%d) %s",
                       errno, strerror(errno));
-    throw new TRoboClawException("[RoboClaw::readByteWithTimeout2 Read error");
+    throw CommunicationException("readByteWithTimeout2", "Poll failed: %s", strerror(errno));
   } else if (retval == 0) {
-    std::stringstream ev;
-    ev << "[RoboClaw::readByteWithTimeout2 TIMEOUT revents: " << std::hex
-       << ufd[0].revents;
-    RCUTILS_LOG_ERROR(ev.str().c_str());
-    throw new TRoboClawException("[RoboClaw::readByteWithTimeout2 TIMEOUT");
+    // Timeout - don't log here, let the command handler log with context
+    throw TimeoutException("readByteWithTimeout2", 11);
   } else if (ufd[0].revents & POLLERR) {
     RCUTILS_LOG_ERROR("[RoboClaw::readByteWithTimeout2 Error on socket");
     restartPort();
-    throw new TRoboClawException(
-        "[RoboClaw::readByteWithTimeout2 Error on socket");
+    throw CommunicationException("readByteWithTimeout2", "Error on socket");
   } else if (ufd[0].revents & POLLIN) {
     unsigned char buffer[1];
     ssize_t bytesRead = ::read(device_port_, buffer, sizeof(buffer));
@@ -504,8 +495,7 @@ uint8_t RoboClaw::readByteWithTimeout2() {
           "[RoboClaw::readByteWithTimeout2 Failed to read 1 byte, read: "
           "%d",
           (int)bytesRead);
-      throw TRoboClawException(
-          "[RoboClaw::readByteWithTimeout2 Failed to read 1 byte");
+      throw CommunicationException("readByteWithTimeout2", "Failed to read 1 byte (read: %d)", (int)bytesRead);
     }
 
     if (do_debug_ || do_low_level_debug_) {
@@ -518,8 +508,7 @@ uint8_t RoboClaw::readByteWithTimeout2() {
     return buffer[0];
   } else {
     RCUTILS_LOG_ERROR("[RoboClaw::readByteWithTimeout2 Unhandled case");
-    throw new TRoboClawException(
-        "[RoboClaw::readByteWithTimeout2 Unhandled case");
+    throw CommunicationException("readByteWithTimeout2", "Unhandled case (revents: 0x%X)", ufd[0].revents);
   }
 
   return 0;
@@ -547,7 +536,7 @@ void RoboClaw::readSensorGroup() {
         // If we get here, port opened successfully, fall through to read sensors
       } else {
         // Don't spam reconnection attempts
-        throw new TRoboClawException("[RoboClaw::readSensorGroup] Device disconnected");
+        throw DeviceNotRespondingException("readSensorGroup");
       }
     }
     
@@ -654,7 +643,7 @@ void RoboClaw::restartPort() {
   // Don't try to reopen if we're already marked as disconnected
   // This prevents spam when the device is unplugged
   if (connection_state_ == DISCONNECTED) {
-    throw new TRoboClawException("[RoboClaw::restartPort] Device is disconnected");
+    throw DeviceNotRespondingException("restartPort");
   }
   
   usleep(200000);
@@ -740,8 +729,8 @@ void RoboClaw::writeByte2(uint8_t byte) {
         "errno: %d)",
         (int)result, errno);
     restartPort();
-    throw new TRoboClawException(
-        "[RoboClaw::writeByte2 Unable to write one byte");
+    throw CommunicationException("writeByte2", "Unable to write one byte (result: %d, errno: %d)", 
+                                 (int)result, errno);
   }
 }
 
@@ -771,7 +760,7 @@ void RoboClaw::writeN2(bool sendCRC, uint8_t cnt, ...) {
           "0x%02X",
           response);
       RCUTILS_LOG_ERROR("%s", msg);
-      throw new TRoboClawException(msg);
+      throw InvalidResponseException("writeN2", "Expected ACK 0xFF but got 0x%02X", response);
     }
   }
 }
@@ -916,12 +905,49 @@ void RoboClaw::recordSuccessfulCommunication() {
   }
 }
 
-void RoboClaw::recordFailedCommunication() {
+void RoboClaw::recordFailedCommunication(const TRoboClawException& e) {
   consecutive_errors_++;
   total_messages_++;
   total_errors_++;
   
+  // Update error statistics
+  error_stats_.last_error_message = e.what();
+  error_stats_.last_error_time = std::chrono::steady_clock::now();
+  
+  // Classify error type
+  if (dynamic_cast<const TimeoutException*>(&e)) {
+    error_stats_.total_timeouts++;
+  } else if (dynamic_cast<const CrcException*>(&e)) {
+    error_stats_.total_crc_errors++;
+  } else if (dynamic_cast<const InvalidResponseException*>(&e)) {
+    error_stats_.total_ack_errors++;
+  } else if (dynamic_cast<const DeviceNotRespondingException*>(&e)) {
+    error_stats_.total_device_not_responding++;
+  } else if (dynamic_cast<const CommunicationException*>(&e)) {
+    error_stats_.total_communication_errors++;
+  }
+  
   if (consecutive_errors_ >= error_threshold_ && connection_state_ == CONNECTED) {
     setConnectionState(DISCONNECTED, "Too many consecutive errors");
+  }
+}
+
+void RoboClaw::recordError(const TRoboClawException& e) {
+  // Update error statistics without affecting connection state or consecutive error count
+  // This is used to track errors that were recovered via retry
+  error_stats_.last_error_message = e.what();
+  error_stats_.last_error_time = std::chrono::steady_clock::now();
+  
+  // Classify error type
+  if (dynamic_cast<const TimeoutException*>(&e)) {
+    error_stats_.total_timeouts++;
+  } else if (dynamic_cast<const CrcException*>(&e)) {
+    error_stats_.total_crc_errors++;
+  } else if (dynamic_cast<const InvalidResponseException*>(&e)) {
+    error_stats_.total_ack_errors++;
+  } else if (dynamic_cast<const DeviceNotRespondingException*>(&e)) {
+    error_stats_.total_device_not_responding++;
+  } else if (dynamic_cast<const CommunicationException*>(&e)) {
+    error_stats_.total_communication_errors++;
   }
 }

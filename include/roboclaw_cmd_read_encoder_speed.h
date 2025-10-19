@@ -8,18 +8,11 @@ class CmdReadEncoderSpeed : public Cmd {
                       int32_t &speed)
       : Cmd(roboclaw, "ReadEncoderSpeed", motor), speed_(speed) {}
   void send() override {
-    try {
-      roboclaw_.appendToWriteLog("ReadEncoderSpeed: motor: %d (%s), WROTE: ",
-                                 motor_, motor_ == RoboClaw::kM1 ? "M1" : "M2");
-      speed_ = roboclaw_.getVelocityResult(
-          motor_ == RoboClaw::kM1 ? kGETM1SPEED : kGETM2SPEED);
-      roboclaw_.appendToReadLog(", RESULT: %d", speed_);
-      return;
-    } catch (...) {
-      RCUTILS_LOG_ERROR(
-          "[RoboClaw::CmdReadEncoderSpeed] Uncaught exception "
-          "!!!");
-    }
+    roboclaw_.appendToWriteLog("ReadEncoderSpeed: motor: %d (%s), WROTE: ",
+                               motor_, motor_ == RoboClaw::kM1 ? "M1" : "M2");
+    speed_ = roboclaw_.getVelocityResult(
+        motor_ == RoboClaw::kM1 ? kGETM1SPEED : kGETM2SPEED);
+    roboclaw_.appendToReadLog(", RESULT: %d", speed_);
   }
 
  private:

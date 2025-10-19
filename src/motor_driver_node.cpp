@@ -45,14 +45,32 @@ void diagnosticOverall(diagnostic_updater::DiagnosticStatusWrapper &stat) {
     // Firmware version (cached at startup)
     stat.add("Firmware Version", roboclaw->getCachedFirmwareVersion());
     
+    // Get current time for elapsed time calculations
+    auto now = std::chrono::steady_clock::now();
+    
     // Connection details
     stat.add("Connection State", "CONNECTED");
     stat.add("Consecutive Errors", static_cast<int>(roboclaw->getConsecutiveErrors()));
     stat.add("Total Messages", static_cast<int>(roboclaw->getTotalMessages()));
     stat.add("Total Errors", static_cast<int>(roboclaw->getTotalErrors()));
     
+    // Error statistics breakdown
+    const RoboClaw::ErrorStats& error_stats = roboclaw->getErrorStats();
+    stat.add("Total Timeouts", static_cast<int>(error_stats.total_timeouts));
+    stat.add("Total CRC Errors", static_cast<int>(error_stats.total_crc_errors));
+    stat.add("Total ACK Errors", static_cast<int>(error_stats.total_ack_errors));
+    stat.add("Total Device Not Responding", static_cast<int>(error_stats.total_device_not_responding));
+    stat.add("Total Communication Errors", static_cast<int>(error_stats.total_communication_errors));
+    
+    // Last error details
+    if (!error_stats.last_error_message.empty()) {
+      stat.add("Last Error Message", error_stats.last_error_message);
+      auto error_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          now - error_stats.last_error_time);
+      stat.add("Last Error Time (ms ago)", static_cast<int>(error_elapsed.count()));
+    }
+    
     // Calculate time since last successful communication
-    auto now = std::chrono::steady_clock::now();
     auto last_comm = roboclaw->getLastSuccessfulCommunication();
     auto comm_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_comm);
     stat.add("Last Successful Communication (ms ago)", static_cast<int>(comm_elapsed.count()));
@@ -123,8 +141,10 @@ void diagnosticOverall(diagnostic_updater::DiagnosticStatusWrapper &stat) {
     
     // Note: sensor_update_rate would require tracking time between readSensorGroup calls
     // This could be added in a future enhancement with additional state tracking
-  } catch (RoboClaw::TRoboClawException* e) {
-    stat.summary(diagnostic_msgs::msg::DiagnosticStatus::ERROR, std::string("Exception: ") + e->what());
+  } catch (const RoboClaw::TRoboClawException& e) {
+    stat.summary(diagnostic_msgs::msg::DiagnosticStatus::ERROR, std::string("Exception: ") + e.what());
+  } catch (const std::exception& e) {
+    stat.summary(diagnostic_msgs::msg::DiagnosticStatus::ERROR, std::string("Std exception: ") + e.what());
   } catch (...) {
     stat.summary(diagnostic_msgs::msg::DiagnosticStatus::ERROR, "Unknown exception accessing device");
   }

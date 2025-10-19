@@ -13,22 +13,16 @@ class CmdDoM1M2DriveSpeedAccel : public Cmd {
         m1_speed_quad_pulses_per_second_(m1_speed_quad_pulses_per_second),
         m2_speed_quad_pulses_per_second_(m2_speed_quad_pulses_per_second) {}
   void send() override {
-    try {
-      roboclaw_.appendToWriteLog(
-          "M1M2WithSignedSpeedAccel: accel: %d, m1Speed: %d, m2Speed: %d, WROTE: ",
-          accel_quad_pulses_per_second_, m1_speed_quad_pulses_per_second_,
-          m2_speed_quad_pulses_per_second_);
-      roboclaw_.writeN2(true, 14, roboclaw_.portAddress_,
-                        RoboClaw::MIXEDSPEEDACCEL,
-                        SetDWORDval(accel_quad_pulses_per_second_),
-                        SetDWORDval(m1_speed_quad_pulses_per_second_),
-                        SetDWORDval(m2_speed_quad_pulses_per_second_)
-      );
-    } catch (...) {
-      RCUTILS_LOG_ERROR(
-          "[RoboClaw::CmdDoM1M2DriveSpeedAccel] Uncaught "
-          "exception !!!");
-    }
+    roboclaw_.appendToWriteLog(
+        "M1M2WithSignedSpeedAccel: accel: %d, m1Speed: %d, m2Speed: %d, WROTE: ",
+        accel_quad_pulses_per_second_, m1_speed_quad_pulses_per_second_,
+        m2_speed_quad_pulses_per_second_);
+    roboclaw_.writeN2(true, 14, roboclaw_.portAddress_,
+                      RoboClaw::MIXEDSPEEDACCEL,
+                      SetDWORDval(accel_quad_pulses_per_second_),
+                      SetDWORDval(m1_speed_quad_pulses_per_second_),
+                      SetDWORDval(m2_speed_quad_pulses_per_second_)
+    );
   }
 
  private:
