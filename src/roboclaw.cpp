@@ -789,16 +789,7 @@ void RoboClaw::setCurrentProtectionParams(float filter_window_seconds,
                    maxM1Current_, maxM2Current_);
 }
 
-void RoboClaw::notifyCmdVel(bool is_zero) {
-  if (!is_zero) {
-    // Track when non-zero cmd_vel is received
-    last_nonzero_cmd_vel_time_ = std::chrono::steady_clock::now();
-    
-    // If in recovery, abort and go back to warning
-    if (current_protection_state_ == RECOVERY_WAITING) {
-      transitionState(OVER_CURRENT_WARNING, "cmd_vel non-zero during recovery");
-    }
-  }
+}
 }
 
 void RoboClaw::addCurrentSample(float m1_current, float m2_current) {

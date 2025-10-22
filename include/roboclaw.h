@@ -268,9 +268,6 @@ class RoboClaw {
                                    float recovery_timeout_seconds,
                                    float sensor_update_rate);
 
-  // Notify RoboClaw of cmd_vel state (for recovery logic)
-  void notifyCmdVel(bool is_zero);
-
   // Get current protection state (for debugging/monitoring)
   OverCurrentState getCurrentProtectionState() const { return current_protection_state_; }
 

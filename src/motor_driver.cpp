@@ -378,15 +378,26 @@ void MotorDriver::cmdVelCallback(
       return;
     }
     
-    double x_velocity =
-        std::min(std::max((float)msg->linear.x, -max_linear_velocity_),
-                 max_linear_velocity_);
-    double yaw_velocity =
-        std::min(std::max((float)msg->angular.z, -max_angular_velocity_),
-                 max_angular_velocity_);
+  // Clamp velocities to limits
+  double x_velocity = std::clamp(msg->linear.x, 
+                                 (double)-max_linear_velocity_, 
+                                 (double)max_linear_velocity_);
+  double yaw_velocity = std::clamp(msg->angular.z, 
+                                   (double)-max_angular_velocity_, 
+                                   (double)max_angular_velocity_);
     
     bool is_zero = (msg->linear.x == 0) && (msg->angular.z == 0);
-    RoboClaw::singleton()->notifyCmdVel(is_zero);
+    
+    // Track cmd_vel state for recovery logic
+    if (!is_zero) {
+      RoboClaw::singleton()->setLastNonzeroCmdVelTime(std::chrono::steady_clock::now());
+      
+      // If in recovery, abort and go back to warning
+      if (RoboClaw::singleton()->getCurrentProtectionState() == RoboClaw::RECOVERY_WAITING) {
+        RoboClaw::singleton()->transitionState(RoboClaw::OVER_CURRENT_WARNING, 
+                                                "cmd_vel non-zero during recovery");
+      }
+    }
     
     // Block movement commands if in fault state
     auto state = RoboClaw::singleton()->getCurrentProtectionState();
@@ -400,9 +411,9 @@ void MotorDriver::cmdVelCallback(
       RoboClaw::singleton()->stop();
     } else if ((fabs(x_velocity) > 0.01) || (fabs(yaw_velocity) > 0.01)) {
       const double m1_desired_velocity =
-          x_velocity - (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
+          x_velocity - (yaw_velocity * wheel_separation_ / 2.0);
       const double m2_desired_velocity =
-          x_velocity + (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
+          x_velocity + (yaw_velocity * wheel_separation_ / 2.0);
 
       // Convert m/s to quad pulses per second
       const int32_t m1_quad_pulses_per_second =
