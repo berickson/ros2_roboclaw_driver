@@ -193,16 +193,16 @@ int main(int argc, char *argv[]) {
 
       RoboClaw::TPIDQ pidq = RoboClaw::singleton()->getPIDQM1();
 
-      roboClawStatus.m1_p = pidq.p;
-      roboClawStatus.m1_i = pidq.i;
-      roboClawStatus.m1_d = pidq.d;
-      roboClawStatus.m1_qpps = pidq.qpps;
+      roboClawStatus.m1_pid_p = pidq.p;
+      roboClawStatus.m1_pid_i = pidq.i;
+      roboClawStatus.m1_pid_d = pidq.d;
+      roboClawStatus.m1_pid_qpps_max = pidq.qpps;
 
       pidq = RoboClaw::singleton()->getPIDQM2();
-      roboClawStatus.m2_p = pidq.p;
-      roboClawStatus.m2_i = pidq.i;
-      roboClawStatus.m2_d = pidq.d;
-      roboClawStatus.m2_qpps = pidq.qpps;
+      roboClawStatus.m2_pid_p = pidq.p;
+      roboClawStatus.m2_pid_i = pidq.i;
+      roboClawStatus.m2_pid_d = pidq.d;
+      roboClawStatus.m2_pid_qpps_max = pidq.qpps;
 
       roboClawStatus.temperature = RoboClaw::singleton()->getTemperature();
 
@@ -213,10 +213,21 @@ int main(int argc, char *argv[]) {
       roboClawStatus.m2_encoder_status =
           RoboClaw::singleton()->getM2EncoderStatus();
 
-      roboClawStatus.m1_current_speed =
+      roboClawStatus.m1_current_speed_qpps =
           RoboClaw::singleton()->getVelocity(RoboClaw::kM1);
-      roboClawStatus.m2_current_speed =
+      roboClawStatus.m2_current_speed_qpps =
           RoboClaw::singleton()->getVelocity(RoboClaw::kM2);
+
+      // Get meters_per_quad_pulse for conversion
+      float meters_per_quad_pulse = MotorDriver::singleton().getMetersPerQuadPulse();
+      
+      // Convert current speeds from qpps to m/s (PV - Process Value)
+      roboClawStatus.m1_current_speed = roboClawStatus.m1_current_speed_qpps * meters_per_quad_pulse;
+      roboClawStatus.m2_current_speed = roboClawStatus.m2_current_speed_qpps * meters_per_quad_pulse;
+      
+      // Get commanded speeds in m/s (SP - Setpoint)
+      roboClawStatus.m1_commanded_speed = MotorDriver::singleton().getM1CommandedVelocityMps();
+      roboClawStatus.m2_commanded_speed = MotorDriver::singleton().getM2CommandedVelocityMps();
 
       roboClawStatus.error_string = RoboClaw::singleton()->getErrorString();
 

@@ -17,7 +17,9 @@
 MotorDriver::MotorDriver()
     : device_name_("foo_bar"),
       wheel_radius_(0.10169),
-      wheel_separation_(0.345) {
+      wheel_separation_(0.345),
+      m1_commanded_velocity_mps_(0.0),
+      m2_commanded_velocity_mps_(0.0) {
 }
 
 void MotorDriver::declareParameters() {
@@ -101,69 +103,69 @@ void MotorDriver::declareParameters() {
   node_->declare_parameter<float>("quad_pulses_per_revolution", 0, quad_pulses_per_revolution_desc);
   
   // 3. Motor Control - PID Tuning (Runtime changeable)
-  rcl_interfaces::msg::ParameterDescriptor m1_p_desc;
-  m1_p_desc.description = "Motor 1 (left) PID proportional gain";
-  m1_p_desc.floating_point_range.resize(1);
-  m1_p_desc.floating_point_range[0].from_value = 0.0;
-  m1_p_desc.floating_point_range[0].to_value = 100000.0;
-  m1_p_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m1_p", 0.0, m1_p_desc);
+  rcl_interfaces::msg::ParameterDescriptor m1_pid_p_desc;
+  m1_pid_p_desc.description = "Motor 1 (left) PID proportional gain";
+  m1_pid_p_desc.floating_point_range.resize(1);
+  m1_pid_p_desc.floating_point_range[0].from_value = 0.0;
+  m1_pid_p_desc.floating_point_range[0].to_value = 100000.0;
+  m1_pid_p_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_pid_p", 0.0, m1_pid_p_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m1_i_desc;
-  m1_i_desc.description = "Motor 1 (left) PID integral gain";
-  m1_i_desc.floating_point_range.resize(1);
-  m1_i_desc.floating_point_range[0].from_value = 0.0;
-  m1_i_desc.floating_point_range[0].to_value = 100000.0;
-  m1_i_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m1_i", 0.0, m1_i_desc);
+  rcl_interfaces::msg::ParameterDescriptor m1_pid_i_desc;
+  m1_pid_i_desc.description = "Motor 1 (left) PID integral gain";
+  m1_pid_i_desc.floating_point_range.resize(1);
+  m1_pid_i_desc.floating_point_range[0].from_value = 0.0;
+  m1_pid_i_desc.floating_point_range[0].to_value = 100000.0;
+  m1_pid_i_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_pid_i", 0.0, m1_pid_i_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m1_d_desc;
-  m1_d_desc.description = "Motor 1 (left) PID derivative gain";
-  m1_d_desc.floating_point_range.resize(1);
-  m1_d_desc.floating_point_range[0].from_value = 0.0;
-  m1_d_desc.floating_point_range[0].to_value = 100000.0;
-  m1_d_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m1_d", 0.0, m1_d_desc);
+  rcl_interfaces::msg::ParameterDescriptor m1_pid_d_desc;
+  m1_pid_d_desc.description = "Motor 1 (left) PID derivative gain";
+  m1_pid_d_desc.floating_point_range.resize(1);
+  m1_pid_d_desc.floating_point_range[0].from_value = 0.0;
+  m1_pid_d_desc.floating_point_range[0].to_value = 100000.0;
+  m1_pid_d_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m1_pid_d", 0.0, m1_pid_d_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m1_qpps_desc;
-  m1_qpps_desc.description = "Motor 1 max speed in quad pulses/sec (for PID scaling, not a limit)";
-  m1_qpps_desc.integer_range.resize(1);
-  m1_qpps_desc.integer_range[0].from_value = 0;
-  m1_qpps_desc.integer_range[0].to_value = 1000000;
-  m1_qpps_desc.integer_range[0].step = 0;
-  node_->declare_parameter<int>("m1_qpps", 0, m1_qpps_desc);
+  rcl_interfaces::msg::ParameterDescriptor m1_pid_qpps_max_desc;
+  m1_pid_qpps_max_desc.description = "Motor 1 max speed in quad pulses/sec (for PID scaling, not a limit)";
+  m1_pid_qpps_max_desc.integer_range.resize(1);
+  m1_pid_qpps_max_desc.integer_range[0].from_value = 0;
+  m1_pid_qpps_max_desc.integer_range[0].to_value = 1000000;
+  m1_pid_qpps_max_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("m1_pid_qpps_max", 0, m1_pid_qpps_max_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m2_p_desc;
-  m2_p_desc.description = "Motor 2 (right) PID proportional gain";
-  m2_p_desc.floating_point_range.resize(1);
-  m2_p_desc.floating_point_range[0].from_value = 0.0;
-  m2_p_desc.floating_point_range[0].to_value = 100000.0;
-  m2_p_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m2_p", 0.0, m2_p_desc);
+  rcl_interfaces::msg::ParameterDescriptor m2_pid_p_desc;
+  m2_pid_p_desc.description = "Motor 2 (right) PID proportional gain";
+  m2_pid_p_desc.floating_point_range.resize(1);
+  m2_pid_p_desc.floating_point_range[0].from_value = 0.0;
+  m2_pid_p_desc.floating_point_range[0].to_value = 100000.0;
+  m2_pid_p_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_pid_p", 0.0, m2_pid_p_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m2_i_desc;
-  m2_i_desc.description = "Motor 2 (right) PID integral gain";
-  m2_i_desc.floating_point_range.resize(1);
-  m2_i_desc.floating_point_range[0].from_value = 0.0;
-  m2_i_desc.floating_point_range[0].to_value = 100000.0;
-  m2_i_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m2_i", 0.0, m2_i_desc);
+  rcl_interfaces::msg::ParameterDescriptor m2_pid_i_desc;
+  m2_pid_i_desc.description = "Motor 2 (right) PID integral gain";
+  m2_pid_i_desc.floating_point_range.resize(1);
+  m2_pid_i_desc.floating_point_range[0].from_value = 0.0;
+  m2_pid_i_desc.floating_point_range[0].to_value = 100000.0;
+  m2_pid_i_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_pid_i", 0.0, m2_pid_i_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m2_d_desc;
-  m2_d_desc.description = "Motor 2 (right) PID derivative gain";
-  m2_d_desc.floating_point_range.resize(1);
-  m2_d_desc.floating_point_range[0].from_value = 0.0;
-  m2_d_desc.floating_point_range[0].to_value = 100000.0;
-  m2_d_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m2_d", 0.0, m2_d_desc);
+  rcl_interfaces::msg::ParameterDescriptor m2_pid_d_desc;
+  m2_pid_d_desc.description = "Motor 2 (right) PID derivative gain";
+  m2_pid_d_desc.floating_point_range.resize(1);
+  m2_pid_d_desc.floating_point_range[0].from_value = 0.0;
+  m2_pid_d_desc.floating_point_range[0].to_value = 100000.0;
+  m2_pid_d_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("m2_pid_d", 0.0, m2_pid_d_desc);
   
-  rcl_interfaces::msg::ParameterDescriptor m2_qpps_desc;
-  m2_qpps_desc.description = "Motor 2 max speed in quad pulses/sec (for PID scaling, not a limit)";
-  m2_qpps_desc.integer_range.resize(1);
-  m2_qpps_desc.integer_range[0].from_value = 0;
-  m2_qpps_desc.integer_range[0].to_value = 1000000;
-  m2_qpps_desc.integer_range[0].step = 0;
-  node_->declare_parameter<int>("m2_qpps", 0, m2_qpps_desc);
+  rcl_interfaces::msg::ParameterDescriptor m2_pid_qpps_max_desc;
+  m2_pid_qpps_max_desc.description = "Motor 2 max speed in quad pulses/sec (for PID scaling, not a limit)";
+  m2_pid_qpps_max_desc.integer_range.resize(1);
+  m2_pid_qpps_max_desc.integer_range[0].from_value = 0;
+  m2_pid_qpps_max_desc.integer_range[0].to_value = 1000000;
+  m2_pid_qpps_max_desc.integer_range[0].step = 0;
+  node_->declare_parameter<int>("m2_pid_qpps_max", 0, m2_pid_qpps_max_desc);
   
   // 4. Motion Limits (Runtime changeable)
   rcl_interfaces::msg::ParameterDescriptor max_linear_velocity_desc;
@@ -283,15 +285,15 @@ void MotorDriver::initializeParameters() {
   node_->get_parameter("device_port", device_port_);
   node_->get_parameter("do_debug", do_debug_);
   node_->get_parameter("do_low_level_debug", do_low_level_debug_);
-  node_->get_parameter("m1_p", m1_p_);
-  node_->get_parameter("m1_i", m1_i_);
-  node_->get_parameter("m1_d", m1_d_);
-  node_->get_parameter("m1_qpps", m1_qpps_);
+  node_->get_parameter("m1_pid_p", m1_pid_p_);
+  node_->get_parameter("m1_pid_i", m1_pid_i_);
+  node_->get_parameter("m1_pid_d", m1_pid_d_);
+  node_->get_parameter("m1_pid_qpps_max", m1_pid_qpps_max_);
   node_->get_parameter("m1_max_current", m1_max_current_);
-  node_->get_parameter("m2_p", m2_p_);
-  node_->get_parameter("m2_i", m2_i_);
-  node_->get_parameter("m2_d", m2_d_);
-  node_->get_parameter("m2_qpps", m2_qpps_);
+  node_->get_parameter("m2_pid_p", m2_pid_p_);
+  node_->get_parameter("m2_pid_i", m2_pid_i_);
+  node_->get_parameter("m2_pid_d", m2_pid_d_);
+  node_->get_parameter("m2_pid_qpps_max", m2_pid_qpps_max_);
   node_->get_parameter("m2_max_current", m2_max_current_);
   node_->get_parameter("max_angular_velocity", max_angular_velocity_);
   node_->get_parameter("max_linear_velocity", max_linear_velocity_);
@@ -341,15 +343,15 @@ void MotorDriver::logParameters() const {
   RCUTILS_LOG_INFO("do_debug: %s", do_debug_ ? "True" : "False");
   RCUTILS_LOG_INFO("do_low_level_debug: %s",
                    do_low_level_debug_ ? "True" : "False");
-  RCUTILS_LOG_INFO("m1_p: %f", m1_p_);
-  RCUTILS_LOG_INFO("m1_i: %f", m1_i_);
-  RCUTILS_LOG_INFO("m1_d: %f", m1_d_);
-  RCUTILS_LOG_INFO("m1_qpps: %d", m1_qpps_);
+  RCUTILS_LOG_INFO("m1_pid_p: %f", m1_pid_p_);
+  RCUTILS_LOG_INFO("m1_pid_i: %f", m1_pid_i_);
+  RCUTILS_LOG_INFO("m1_pid_d: %f", m1_pid_d_);
+  RCUTILS_LOG_INFO("m1_pid_qpps_max: %d", m1_pid_qpps_max_);
   RCUTILS_LOG_INFO("m1_max_current: %f", m1_max_current_);
-  RCUTILS_LOG_INFO("m2_p: %f", m2_p_);
-  RCUTILS_LOG_INFO("m2_i: %f", m2_i_);
-  RCUTILS_LOG_INFO("m2_d: %f", m2_d_);
-  RCUTILS_LOG_INFO("m2_qpps: %d", m2_qpps_);
+  RCUTILS_LOG_INFO("m2_pid_p: %f", m2_pid_p_);
+  RCUTILS_LOG_INFO("m2_pid_i: %f", m2_pid_i_);
+  RCUTILS_LOG_INFO("m2_pid_d: %f", m2_pid_d_);
+  RCUTILS_LOG_INFO("m2_pid_qpps_max: %d", m2_pid_qpps_max_);
   RCUTILS_LOG_INFO("m2_max_current: %f", m2_max_current_);
   RCUTILS_LOG_INFO("max_angular_velocity: %f", max_angular_velocity_);
   RCUTILS_LOG_INFO("max_linear_velocity: %f", max_linear_velocity_);
@@ -398,11 +400,18 @@ void MotorDriver::cmdVelCallback(
     
     if (is_zero) {
       RoboClaw::singleton()->stop();
-    } else if ((fabs(x_velocity) > 0.01) || (fabs(yaw_velocity) > 0.01)) {
+      m1_commanded_velocity_mps_ = 0.0;
+      m2_commanded_velocity_mps_ = 0.0;
+    // } else if ((fabs(x_velocity) > 0.01) || (fabs(yaw_velocity) > 0.01)) {
+    } else {
       const double m1_desired_velocity =
           x_velocity - (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
       const double m2_desired_velocity =
           x_velocity + (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
+
+      // Store commanded velocities in m/s for monitoring
+      m1_commanded_velocity_mps_ = m1_desired_velocity;
+      m2_commanded_velocity_mps_ = m2_desired_velocity;
 
       // Convert m/s to quad pulses per second
       const int32_t m1_quad_pulses_per_second =
@@ -427,9 +436,9 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
   node_->get_parameter("current_filter_window_seconds", current_filter_window_seconds_);
   node_->get_parameter("recovery_timeout_seconds", recovery_timeout_seconds_);
 
-  RoboClaw::TPIDQ m1Pid = {m1_p_, m1_i_, m1_d_, (uint32_t)m1_qpps_,
+  RoboClaw::TPIDQ m1Pid = {m1_pid_p_, m1_pid_i_, m1_pid_d_, (uint32_t)m1_pid_qpps_max_,
                            m1_max_current_};
-  RoboClaw::TPIDQ m2Pid = {m2_p_, m2_i_, m2_d_, (uint32_t)m2_qpps_,
+  RoboClaw::TPIDQ m2Pid = {m2_pid_p_, m2_pid_i_, m2_pid_d_, (uint32_t)m2_pid_qpps_max_,
                            m2_max_current_};
 
   new RoboClaw(m1Pid, m2Pid, m1_max_current_, m2_max_current_,
@@ -625,108 +634,108 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     const std::string &name = param.get_name();
     
     // PID Parameters (8 params) - Runtime changeable
-    if (name == "m1_p") {
+    if (name == "m1_pid_p") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m1_p_ = new_value;
+        m1_pid_p_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m1_p to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_p to %.2f", new_value);
       } else {
         result.successful = false;
-        result.reason = "m1_p must be between 0.0 and 100000.0";
+        result.reason = "m1_pid_p must be between 0.0 and 100000.0";
         return result;
       }
-    } else if (name == "m1_i") {
+    } else if (name == "m1_pid_i") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m1_i_ = new_value;
+        m1_pid_i_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m1_i to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_i to %.2f", new_value);
       } else {
         result.successful = false;
-        result.reason = "m1_i must be between 0.0 and 100000.0";
+        result.reason = "m1_pid_i must be between 0.0 and 100000.0";
         return result;
       }
-    } else if (name == "m1_d") {
+    } else if (name == "m1_pid_d") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m1_d_ = new_value;
+        m1_pid_d_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m1_d to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_d to %.2f", new_value);
       } else {
         result.successful = false;
-        result.reason = "m1_d must be between 0.0 and 100000.0";
+        result.reason = "m1_pid_d must be between 0.0 and 100000.0";
         return result;
       }
-    } else if (name == "m1_qpps") {
+    } else if (name == "m1_pid_qpps_max") {
       int new_value = param.as_int();
       if (new_value >= 0 && new_value <= 1000000) {
-        m1_qpps_ = new_value;
+        m1_pid_qpps_max_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_p_, m1_i_, m1_d_, m1_qpps_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m1_qpps to %d", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_qpps_max to %d", new_value);
       } else {
         result.successful = false;
-        result.reason = "m1_qpps must be between 0 and 1000000";
+        result.reason = "m1_pid_qpps_max must be between 0 and 1000000";
         return result;
       }
-    } else if (name == "m2_p") {
+    } else if (name == "m2_pid_p") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m2_p_ = new_value;
+        m2_pid_p_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m2_p to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_p to %.2f", new_value);
       } else {
         result.successful = false;
-        result.reason = "m2_p must be between 0.0 and 100000.0";
+        result.reason = "m2_pid_p must be between 0.0 and 100000.0";
         return result;
       }
-    } else if (name == "m2_i") {
+    } else if (name == "m2_pid_i") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m2_i_ = new_value;
+        m2_pid_i_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m2_i to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_i to %.2f", new_value);
       } else {
         result.successful = false;
-        result.reason = "m2_i must be between 0.0 and 100000.0";
+        result.reason = "m2_pid_i must be between 0.0 and 100000.0";
         return result;
       }
-    } else if (name == "m2_d") {
+    } else if (name == "m2_pid_d") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m2_d_ = new_value;
+        m2_pid_d_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m2_d to %.2f", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_d to %.2f", new_value);
       } else {
         result.successful = false;
-        result.reason = "m2_d must be between 0.0 and 100000.0";
+        result.reason = "m2_pid_d must be between 0.0 and 100000.0";
         return result;
       }
-    } else if (name == "m2_qpps") {
+    } else if (name == "m2_pid_qpps_max") {
       int new_value = param.as_int();
       if (new_value >= 0 && new_value <= 1000000) {
-        m2_qpps_ = new_value;
+        m2_pid_qpps_max_ = new_value;
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_p_, m2_i_, m2_d_, m2_qpps_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
         }
-        RCLCPP_INFO(node_->get_logger(), "Updated m2_qpps to %d", new_value);
+        RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_qpps_max to %d", new_value);
       } else {
         result.successful = false;
-        result.reason = "m2_qpps must be between 0 and 1000000";
+        result.reason = "m2_pid_qpps_max must be between 0 and 1000000";
         return result;
       }
     }

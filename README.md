@@ -48,19 +48,19 @@ to publish a status message for the RoboClaw device, which are mostly values pul
 The message is a custom ROS2 message of type **ros2_roboclaw_driver/RoboClawStatus** and the specification of that message is
 
 ```
-float32  m1_p
-float32  m1_i
-float32  m1_d
-uint32  m1_qpps
+float32  m1_pid_p
+float32  m1_pid_i
+float32  m1_pid_d
+uint32  m1_qpps_max
 int32   m1_current_speed
 float32  m1_motor_current
 uint32  m1_encoder_value
 uint8  m1_encoder_status
 
-float32  m2_p
-float32  m2_i
-float32  m2_d
-uint32  m2_qpps
+float32  m2_pid_p
+float32  m2_pid_i
+float32  m2_pid_d
+uint32  m2_qpps_max
 int32   m2_current_speed
 float32  m2_motor_current
 uint32  m2_encoder_value
@@ -148,14 +148,14 @@ motor_driver_node:
     # The P, I, D and maximum quadrature pulses per second for both motors.
     # These values are for my robot. Replace them with your own values.
     # Use can use Basic Micro's Motion Studio to determine the values.
-    m1_p: 7.26239
-    m1_i: 1.36838
-    m1_d: 0.0
-    m1_qpps: 2437
-    m2_p: 7.26239
-    m2_i: 1.28767
-    m2_d: 0.0
-    m2_qpps: 2437
+    m1_pid_p: 7.26239
+    m1_pid_i: 1.36838
+    m1_pid_d: 0.0
+    m1_pid_qpps_max: 2437
+    m2_pid_p: 7.26239
+    m2_pid_i: 1.28767
+    m2_pid_d: 0.0
+    m2_pid_qpps_max: 2437
 
     # The maximum expected current (in amps) for both motors.
     # Used just to signal warnings.

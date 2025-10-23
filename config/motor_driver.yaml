@@ -25,14 +25,14 @@ motor_driver_node:
     # The P, I, D and maximum quadrature pulses per second for both motors.
     # These values are for my robot. Replace them with your own values.
     # Use can use Basic Micro's Motion Studio to determine the values.
-    m1_p: 10.0
-    m1_i: 0.0
-    m1_d: 0.0
-    m1_qpps: 2437
-    m2_p: 10.0
-    m2_i: 0.0
-    m2_d: 0.0
-    m2_qpps: 2437
+    m1_pid_p: 10.0
+    m1_pid_i: 0.0
+    m1_pid_d: 0.0
+    m1_pid_qpps_max: 2437
+    m2_pid_p: 10.0
+    m2_pid_i: 0.0
+    m2_pid_d: 0.0
+    m2_pid_qpps: 2437
 
     # The maximum expected current (in amps) for both motors.
     # Used just to signal warnings.

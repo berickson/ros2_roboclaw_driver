@@ -13,6 +13,13 @@ class MotorDriver {
 
   void onInit(rclcpp::Node::SharedPtr node);
 
+  // Getters for commanded velocities (for status publishing)
+  float getM1CommandedVelocityMps() const { return m1_commanded_velocity_mps_; }
+  float getM2CommandedVelocityMps() const { return m2_commanded_velocity_mps_; }
+  
+  // Getter for meters_per_quad_pulse (for status publishing)
+  float getMetersPerQuadPulse() const { return meters_per_quad_pulse_; }
+
  private:
   void declareParameters();
   void eulerToQuaternion(float roll, float pitch, float yaw, float *q);
@@ -38,15 +45,15 @@ class MotorDriver {
   int device_port_;
   bool do_debug_;
   bool do_low_level_debug_;
-  float m1_p_;
-  float m1_i_;
-  float m1_d_;
-  int m1_qpps_;
+  float m1_pid_p_;
+  float m1_pid_i_;
+  float m1_pid_d_;
+  int m1_pid_qpps_max_;
   float m1_max_current_;
-  float m2_p_;
-  float m2_i_;
-  float m2_d_;
-  int m2_qpps_;
+  float m2_pid_p_;
+  float m2_pid_i_;
+  float m2_pid_d_;
+  int m2_pid_qpps_max_;
   float m2_max_current_;
   float max_angular_velocity_;
   float max_linear_velocity_;
@@ -63,6 +70,10 @@ class MotorDriver {
   float wheel_separation_;
   float current_filter_window_seconds_;  // For current averaging
   float recovery_timeout_seconds_;       // For auto-recovery from over-current
+
+  // Track commanded velocities for debugging/monitoring
+  float m1_commanded_velocity_mps_;  // meters per second
+  float m2_commanded_velocity_mps_;  // meters per second
 
   static MotorDriver *g_singleton;
 };
