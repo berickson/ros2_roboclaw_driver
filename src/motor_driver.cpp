@@ -380,12 +380,11 @@ void MotorDriver::cmdVelCallback(
       return;
     }
     
-    double x_velocity =
-        std::min(std::max((float)msg->linear.x, -max_linear_velocity_),
-                 max_linear_velocity_);
+    double x_velocity = 
+      std::clamp((float)msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
+       
     double yaw_velocity =
-        std::min(std::max((float)msg->angular.z, -max_angular_velocity_),
-                 max_angular_velocity_);
+      std::clamp((float)msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
     
     bool is_zero = (msg->linear.x == 0) && (msg->angular.z == 0);
     RoboClaw::singleton()->notifyCmdVel(is_zero);
