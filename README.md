@@ -4,6 +4,11 @@ This driver is hard coded to use a pair of motors, presumed to be in a
 differential drive configuration. In various places, they are refered to
 as ***m1*** and ***m2***. It is expected that ***m1*** is the left motor and ***m2*** is the right motor.
 
+## Documentation
+
+- **[Parameters Reference](parameters.md)** -
+
+
 # Prerequisites
 - [ROS2, Jazzy distribution](https://docs.ros.org/en/jazzy/Installation.html)
 - git
