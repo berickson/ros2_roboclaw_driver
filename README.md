@@ -229,7 +229,7 @@ You should be using limits in, e.g., the ROS2 navigation stack configuration fil
 
 The driver will also stop the motors if no new command is received within a certain time period. This is set in the configuration file as **max_seconds_uncommanded_travel**. The default value is 0.25 seconds. This means that if no new command is received within 0.25 seconds, the motors will be stopped. This is a safety feature to prevent the robot from running away if the navigation stack fails to send commands.
 
-After the watchdog timeout, motors will coast to save power. The **coast_timeout_seconds** parameter (default 0.5s) sets how long to wait without cmd_vel before releasing motor holding torque. Set to 0.0 to disable. Coast mode allows manual wheel movement and reduces idle power consumption by about 100-300 mA.
+If stopped and no cmd_vel is received, motors will coast to save power. The **coast_timeout_seconds** parameter (default 0.5s) sets how long to wait without cmd_vel before releasing motor holding torque. Set to 0.0 to disable. Coast mode allows manual wheel movement and reduces idle power consumption by about 100-300 mA.
 
 **NOTE** The following is a note for a future feature, not implemented yet.
 ```
