@@ -257,6 +257,9 @@ class RoboClaw {
   // Stop motion.
   void stop();
 
+  // Coast motors (set duty cycle to zero for power saving).
+  void coast();
+
   // Get singleton instance of class.
   static RoboClaw *singleton();
 
@@ -570,6 +573,7 @@ class RoboClaw {
   friend class CmdReadSerialTimeout;
   friend class CmdReadStatus;
   friend class CmdReadTemperature;
+  friend class CmdSetDutyCycle;
   friend class CmdSetEncoderValue;
   friend class CmdSetPid;
   friend class CmdSetSerialTimeout;

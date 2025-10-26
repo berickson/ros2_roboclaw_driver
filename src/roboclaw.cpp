@@ -27,6 +27,7 @@
 #include "roboclaw_cmd_read_serial_timeout.h"
 #include "roboclaw_cmd_read_status.h"
 #include "roboclaw_cmd_read_temperature.h"
+#include "roboclaw_cmd_set_duty_cycle.h"
 #include "roboclaw_cmd_set_encoder_value.h"
 #include "roboclaw_cmd_set_pid.h"
 #include "roboclaw_cmd_set_serial_timeout.h"
@@ -689,6 +690,11 @@ float RoboClaw::getSerialTimeout() {
 void RoboClaw::stop() {
   CmdDoM1M2DriveSpeedAccel stopCommand(*this, 0, 0, 0);
   stopCommand.execute();
+}
+
+void RoboClaw::coast() {
+  CmdSetDutyCycle coastCommand(*this, 0, 0);
+  coastCommand.execute();
 }
 
 void RoboClaw::updateCrc(uint16_t &crc, uint8_t data) {

@@ -19,7 +19,10 @@ MotorDriver::MotorDriver()
       wheel_radius_(0.10169),
       wheel_separation_(0.345),
       m1_commanded_velocity_mps_(0.0),
-      m2_commanded_velocity_mps_(0.0) {
+      m2_commanded_velocity_mps_(0.0),
+      coast_timeout_seconds_(0.5),
+      last_cmd_vel_time_(rclcpp::Time(0)),
+      is_coasting_(true) {
 }
 
 void MotorDriver::declareParameters() {
@@ -242,6 +245,14 @@ void MotorDriver::declareParameters() {
   watchdog_desc.floating_point_range[0].step = 0.0;
   node_->declare_parameter<float>("max_seconds_uncommanded_travel", 0.0, watchdog_desc);
   
+  rcl_interfaces::msg::ParameterDescriptor coast_timeout_desc;
+  coast_timeout_desc.description = "Time without any cmd_vel message before automatically coasting motors to save power (seconds). Set to 0.0 to disable.";
+  coast_timeout_desc.floating_point_range.resize(1);
+  coast_timeout_desc.floating_point_range[0].from_value = 0.0;
+  coast_timeout_desc.floating_point_range[0].to_value = 60.0;
+  coast_timeout_desc.floating_point_range[0].step = 0.0;
+  node_->declare_parameter<float>("coast_timeout_seconds", 0.5, coast_timeout_desc);
+  
   // 7. Publishing & Topics (Read-Only, require restart)
   rcl_interfaces::msg::ParameterDescriptor publish_joint_states_desc;
   publish_joint_states_desc.description = "Publish wheel joint states for robot_state_publisher";
@@ -312,6 +323,7 @@ void MotorDriver::initializeParameters() {
   node_->get_parameter("wheel_separation", wheel_separation_);
   node_->get_parameter("current_filter_window_seconds", current_filter_window_seconds_);
   node_->get_parameter("recovery_timeout_seconds", recovery_timeout_seconds_);
+  node_->get_parameter("coast_timeout_seconds", coast_timeout_seconds_);
   
   // Handle backward compatibility and compute derived values
   if (meters_per_quad_pulse_ == 0.0 && quad_pulses_per_meter_ > 0) {
@@ -369,11 +381,18 @@ void MotorDriver::logParameters() const {
   RCUTILS_LOG_INFO("wheel_separation: %f", wheel_separation_);
   RCUTILS_LOG_INFO("current_filter_window_seconds: %f", current_filter_window_seconds_);
   RCUTILS_LOG_INFO("recovery_timeout_seconds: %f", recovery_timeout_seconds_);
+  RCUTILS_LOG_INFO("coast_timeout_seconds: %f", coast_timeout_seconds_);
 }
 
 void MotorDriver::cmdVelCallback(
     const geometry_msgs::msg::Twist::SharedPtr msg) {
   if (RoboClaw::singleton() != nullptr) {
+    // Always update last cmd_vel time when ANY cmd_vel is received (regardless of value)
+    last_cmd_vel_time_ = node_->now();
+    
+    // Any cmd_vel message (even zero) takes control back from coast mode
+    is_coasting_ = false;
+    
     // Check connection state first
     if (RoboClaw::singleton()->getConnectionState() == RoboClaw::DISCONNECTED) {
       // Don't send commands when disconnected
@@ -448,6 +467,13 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
   RoboClaw::singleton()->setCurrentProtectionParams(
       current_filter_window_seconds_, recovery_timeout_seconds_, sensor_update_rate_);
   
+  // Start motors in coast mode (low power) - they'll take control on first cmd_vel
+  if (coast_timeout_seconds_ > 0.0) {
+    RCUTILS_LOG_INFO("[MotorDriver::onInit] Starting motors in coast mode (power saving)");
+    RoboClaw::singleton()->coast();
+    // is_coasting_ already initialized to true in constructor
+  }
+  
   RCUTILS_LOG_INFO("Main battery: %f",
                    RoboClaw::singleton()->getMainBatteryLevel());
 
@@ -478,12 +504,13 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
         node_->create_publisher<nav_msgs::msg::Odometry>("odom", qos);
   }
 
-  // Start the publisher thread if we are publishing joint states or odometry
-  // messages. This thread will read the RoboClaw sensors and publish the
-  // corresponding messages at the specified sensor update rate.
+  // Start the main loop thread if we are publishing joint states or odometry
+  // messages. This thread reads RoboClaw sensors, checks safety conditions
+  // (watchdog timeout, coast timeout), and publishes status/odometry/joint states
+  // at the specified sensor update rate. Similar to Arduino's loop() function.
   // The thread will run until the node is shut down.
   if (publish_joint_states_ || publish_odom_) {
-    this->publisher_thread_ = std::thread(&MotorDriver::publisherThread, this);
+    this->main_loop_thread_ = std::thread(&MotorDriver::mainLoopThread, this);
   }
 }
 
@@ -502,7 +529,7 @@ void MotorDriver::eulerToQuaternion(float roll, float pitch, float yaw,
   q[3] = sy * cp * cr - cy * sp * sr;
 }
 
-void MotorDriver::publisherThread() {
+void MotorDriver::mainLoopThread() {
   static rclcpp::Clock::SharedPtr clock =
       std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
   rclcpp::WallRate loop_rate(sensor_update_rate_);
@@ -603,19 +630,33 @@ void MotorDriver::publisherThread() {
         g_singleton->odom_publisher_->publish(odometry_msg);
       }
       
+      // Check coast timeout (if enabled and not already coasting)
+      if (coast_timeout_seconds_ > 0.0 && !is_coasting_) {
+        // Calculate time since last cmd_vel message
+        auto time_since_last_cmd_vel = (node_->now() - last_cmd_vel_time_).seconds();
+        
+        if (time_since_last_cmd_vel > coast_timeout_seconds_) {
+          // Timeout exceeded - coast the motors to save power
+          RCUTILS_LOG_INFO("[MotorDriver::mainLoopThread] Coast timeout (%.2fs) exceeded, coasting motors",
+                          coast_timeout_seconds_);
+          RoboClaw::singleton()->coast();
+          is_coasting_ = true;
+        }
+      }
+      
       // If we successfully read sensors, reset the disconnection log flag
       logged_disconnection = false;
       
       } catch (RoboClaw::TRoboClawException *e) {
         // Only log once when we become disconnected, not on every attempt
         if (!logged_disconnection) {
-          RCUTILS_LOG_WARN("[MotorDriver::publisherThread] Exception reading sensors: %s", e->what());
+          RCUTILS_LOG_WARN("[MotorDriver::mainLoopThread] Exception reading sensors: %s", e->what());
           logged_disconnection = true;
         }
         // Continue running - don't let exception terminate thread
       } catch (...) {
         if (!logged_disconnection) {
-          RCUTILS_LOG_WARN("[MotorDriver::publisherThread] Uncaught exception reading sensors");
+          RCUTILS_LOG_WARN("[MotorDriver::mainLoopThread] Uncaught exception reading sensors");
           logged_disconnection = true;
         }
         // Continue running - don't let exception terminate thread
@@ -843,6 +884,16 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
       } else {
         result.successful = false;
         result.reason = "max_seconds_uncommanded_travel must be between 0.0 and 5.0";
+        return result;
+      }
+    } else if (name == "coast_timeout_seconds") {
+      float new_value = param.as_double();
+      if (new_value >= 0.0 && new_value <= 60.0) {
+        coast_timeout_seconds_ = new_value;
+        RCLCPP_INFO(node_->get_logger(), "Updated coast_timeout_seconds to %.2f s (0.0=disabled)", new_value);
+      } else {
+        result.successful = false;
+        result.reason = "coast_timeout_seconds must be between 0.0 and 60.0";
         return result;
       }
     }

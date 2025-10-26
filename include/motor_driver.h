@@ -26,7 +26,7 @@ class MotorDriver {
   void initializeParameters();
   void logParameters() const;
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
-  void publisherThread();
+  void mainLoopThread();  // Main periodic loop: reads sensors, checks safety, publishes
   void watchdogTimerCallback();
   rcl_interfaces::msg::SetParametersResult parametersCallback(
       const std::vector<rclcpp::Parameter> &parameters);
@@ -36,7 +36,7 @@ class MotorDriver {
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr
       joint_state_publisher_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
-  std::thread publisher_thread_;
+  std::thread main_loop_thread_;
   rclcpp::Node::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
   int accel_quad_pulses_per_second_;
@@ -74,6 +74,11 @@ class MotorDriver {
   // Track commanded velocities for debugging/monitoring
   float m1_commanded_velocity_mps_;  // meters per second
   float m2_commanded_velocity_mps_;  // meters per second
+
+  // Coast timeout tracking
+  float coast_timeout_seconds_;       // Time without cmd_vel before coasting (0.0=disabled)
+  rclcpp::Time last_cmd_vel_time_;    // Time of last cmd_vel message received
+  bool is_coasting_;                  // True when motors are in coast mode
 
   static MotorDriver *g_singleton;
 };
