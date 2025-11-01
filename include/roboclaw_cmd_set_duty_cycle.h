@@ -15,7 +15,8 @@ class CmdSetDutyCycle : public Cmd {
         m1_duty_, m2_duty_);
     
     // kMIXEDDUTY command 34 expects two signed 16-bit duty cycle values (-32767 to +32767)
-    roboclaw_.writeN2(true, RoboClaw::kMIXEDDUTY, 
+    // writeN2 count: address(1) + command(1) + m1_high(1) + m1_low(1) + m2_high(1) + m2_low(1) = 6 bytes
+    roboclaw_.writeN2(true, 6, 
                       roboclaw_.portAddress_,
                       RoboClaw::kMIXEDDUTY,
                       (uint8_t)(m1_duty_ >> 8),
