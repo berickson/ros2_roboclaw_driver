@@ -426,9 +426,9 @@ void MotorDriver::cmdVelCallback(
     // } else if ((fabs(x_velocity) > 0.01) || (fabs(yaw_velocity) > 0.01)) {
     } else {
       const double m1_desired_velocity =
-          x_velocity - (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
+          x_velocity - (yaw_velocity * wheel_separation_ / 2.0);
       const double m2_desired_velocity =
-          x_velocity + (yaw_velocity * wheel_separation_ / 2.0) / wheel_radius_;
+          x_velocity + (yaw_velocity * wheel_separation_ / 2.0);
 
       // Store commanded velocities in m/s for monitoring
       m1_commanded_velocity_mps_ = m1_desired_velocity;
