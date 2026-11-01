@@ -24,7 +24,8 @@ and used on the [red-crash](https://github.com/berickson/red-crash) robot.
   temperature are published on `/diagnostics`.
 - **Runtime parameters.** PID, limits, current protection and debug settings
   can be changed with `ros2 param set`. See [parameters.md](parameters.md).
-- **Fixes.** Turn rate units, odometry kinematics, SetDutyCycle byte count,
+- **Fixes.** Turn rate units, odometry kinematics, encoder speed sign
+  (backward speeds read as positive), SetDutyCycle byte count,
   negative odometry readings, thread safety between the command and sensor
   threads.
 - **Message change.** `connection_state` was removed from `RoboClawStatus`;

@@ -323,9 +323,11 @@ int32_t RoboClaw::getVelocityResult(uint8_t command) {
   result |= datum;
   updateCrc(crc, datum);
 
+  // The speed is already signed (two's complement); the direction byte only
+  // repeats the sign. Negating on it turned backward speeds positive, so
+  // odometry could not tell forward from backward or which way it turned.
   uint8_t direction = readByteWithTimeout2();
   updateCrc(crc, direction);
-  if (direction != 0) result = -result;
 
   uint16_t responseCrc = 0;
   datum = readByteWithTimeout2();
