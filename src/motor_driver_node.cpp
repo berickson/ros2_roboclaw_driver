@@ -235,13 +235,19 @@ int main(int argc, char *argv[]) {
       if (RoboClaw::singleton()->getConnectionState() == RoboClaw::CONNECTED) {
         statusPublisher->publish(roboClawStatus);
       }
-    } catch (RoboClaw::TRoboClawException *e) {
-      RCUTILS_LOG_ERROR("[motor_driver_node] Exception: %s", e->what());
+    } catch (const std::exception &e) {
+      RCUTILS_LOG_ERROR("[motor_driver_node] Exception: %s", e.what());
     } catch (...) {
       RCUTILS_LOG_ERROR("[motor_driver_node] Uncaught exception !!!");
     }
 
-    rclcpp::spin_some(node);
+    // Callbacks run inside spin_some(); an exception escaping one used to
+    // abort the whole node when the RoboClaw dropped off USB
+    try {
+      rclcpp::spin_some(node);
+    } catch (const std::exception &e) {
+      RCUTILS_LOG_ERROR("[motor_driver_node] Exception in callback: %s", e.what());
+    }
     loop_rate.sleep();
   }
 

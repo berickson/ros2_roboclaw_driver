@@ -399,7 +399,10 @@ void MotorDriver::cmdVelCallback(
       return;
     }
     
-    double x_velocity = 
+    // A failed command must not escape this callback: it would propagate out
+    // of spin_some() and abort the node. The main loop handles reconnection.
+    try {
+    double x_velocity =
       std::clamp((float)msg->linear.x, -max_linear_velocity_, max_linear_velocity_);
        
     double yaw_velocity =
@@ -441,6 +444,9 @@ void MotorDriver::cmdVelCallback(
       RoboClaw::singleton()->doMixedSpeedAccel(
           accel_quad_pulses_per_second_, m1_quad_pulses_per_second,
           m2_quad_pulses_per_second);
+    }
+    } catch (const std::exception &e) {
+      RCUTILS_LOG_WARN("[MotorDriver::cmdVelCallback] Command failed: %s", e.what());
     }
   }
 }
@@ -647,10 +653,10 @@ void MotorDriver::mainLoopThread() {
       // If we successfully read sensors, reset the disconnection log flag
       logged_disconnection = false;
       
-      } catch (RoboClaw::TRoboClawException *e) {
+      } catch (const std::exception &e) {
         // Only log once when we become disconnected, not on every attempt
         if (!logged_disconnection) {
-          RCUTILS_LOG_WARN("[MotorDriver::mainLoopThread] Exception reading sensors: %s", e->what());
+          RCUTILS_LOG_WARN("[MotorDriver::mainLoopThread] Exception reading sensors: %s", e.what());
           logged_disconnection = true;
         }
         // Continue running - don't let exception terminate thread
@@ -669,7 +675,10 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     const std::vector<rclcpp::Parameter> &parameters) {
   rcl_interfaces::msg::SetParametersResult result;
   result.successful = true;
-  
+
+  // PID and current limit updates talk to the device; a failure must reject
+  // the change rather than abort the node from inside spin_some()
+  try {
   for (const auto &param : parameters) {
     const std::string &name = param.get_name();
     
@@ -932,7 +941,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
       return result;
     }
   }
-  
+  } catch (const std::exception &e) {
+    result.successful = false;
+    result.reason = std::string("RoboClaw command failed: ") + e.what();
+  }
+
   return result;
 }
 

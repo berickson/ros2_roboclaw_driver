@@ -465,6 +465,14 @@ class RoboClaw {
   uint32_t total_errors_;     // Lifetime count of all failed commands
   std::string cached_firmware_version_;  // Firmware version cached at startup
 
+  // Last settings sent to the device, re-sent after a reconnect in case the
+  // RoboClaw itself reset and lost them
+  TPIDQ m1_pid_config_{};
+  TPIDQ m2_pid_config_{};
+  float serial_timeout_config_ = 0.5;
+
+  void reapplyConfiguration();
+
   // Error statistics tracking instance
   ErrorStats error_stats_;
 

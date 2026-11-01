@@ -534,7 +534,9 @@ void RoboClaw::readSensorGroup() {
         // openPort() will throw if it fails, and set DISCONNECTED state
         // The exception will propagate up and prevent sensor reading
         openPort();
-        // If we get here, port opened successfully, fall through to read sensors
+        // A USB drop can also mean the RoboClaw browned out and reset, so
+        // restore the settings it would have lost before reading sensors
+        reapplyConfiguration();
       } else {
         // Don't spam reconnection attempts
         throw DeviceNotRespondingException("readSensorGroup");
@@ -652,16 +654,32 @@ void RoboClaw::restartPort() {
 }
 
 void RoboClaw::setM1PID(float p, float i, float d, uint32_t qpps) {
+  m1_pid_config_.p = p;
+  m1_pid_config_.i = i;
+  m1_pid_config_.d = d;
+  m1_pid_config_.qpps = qpps;
   CmdSetPid command(*this, kM1, p, i, d, qpps);
   command.execute();
 }
 
 void RoboClaw::setM2PID(float p, float i, float d, uint32_t qpps) {
+  m2_pid_config_.p = p;
+  m2_pid_config_.i = i;
+  m2_pid_config_.d = d;
+  m2_pid_config_.qpps = qpps;
   CmdSetPid command(*this, kM2, p, i, d, qpps);
   command.execute();
 }
 
+void RoboClaw::reapplyConfiguration() {
+  RCUTILS_LOG_INFO("[RoboClaw::reapplyConfiguration] Restoring serial timeout and PID settings");
+  setSerialTimeout(serial_timeout_config_);
+  setM1PID(m1_pid_config_.p, m1_pid_config_.i, m1_pid_config_.d, m1_pid_config_.qpps);
+  setM2PID(m2_pid_config_.p, m2_pid_config_.i, m2_pid_config_.d, m2_pid_config_.qpps);
+}
+
 void RoboClaw::setSerialTimeout(float timeout_seconds) {
+  serial_timeout_config_ = timeout_seconds;
   // Convert seconds to tenths of seconds (0.1s units)
   // Clamp to valid range: 0-255 tenths = 0.0-25.5 seconds
   float timeout_tenths_float = timeout_seconds * 10.0f;
