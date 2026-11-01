@@ -27,6 +27,7 @@ find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 include_directories(
   ${diagnostic_msgs_INCLUDE_DIRS}
@@ -36,6 +37,7 @@ include_directories(
   ${rclcpp_INCLUDE_DIRS}
   ${sensor_msgs_INCLUDE_DIRS}
   ${std_msgs_INCLUDE_DIRS}
+  ${std_srvs_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   /usr/include # Ensure standard system headers are included
 )
@@ -71,6 +73,7 @@ ament_target_dependencies(
   nav_msgs
   sensor_msgs
   std_msgs
+  std_srvs
 )
 
 target_link_libraries(ros2_roboclaw_driver_node "${cpp_typesupport_target}")
@@ -101,6 +104,11 @@ if(BUILD_TESTING)
   # uncomment the line when this package is not in a git repo
   # set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  # Unit tests for the kinematics and safety logic; no hardware needed
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_drive_logic test/test_drive_logic.cpp)
+  target_include_directories(test_drive_logic PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 endif()
 
 ament_export_dependencies(rosidl_default_runtime)

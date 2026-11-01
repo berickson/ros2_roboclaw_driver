@@ -122,10 +122,12 @@ void RoboClaw::doMixedSpeedAccel(uint32_t accel_quad_pulses_per_second,
 }
 
 uint32_t RoboClaw::getErrorStatus() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.error_status;
 }
 
 std::string RoboClaw::getErrorString() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.error_string;
 }
 
@@ -175,10 +177,12 @@ std::string RoboClaw::getErrorString(uint32_t status) {
 }
 
 float RoboClaw::getLogicBatteryLevel() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.logic_battery_level;
 }
 
 float RoboClaw::getMainBatteryLevel() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.main_battery_level;
 }
 
@@ -215,14 +219,24 @@ unsigned short RoboClaw::get2ByteCommandResult2(uint8_t command) {
 }
 
 RoboClaw::TMotorCurrents RoboClaw::getMotorCurrents() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.motor_currents;
 }
 
-RoboClaw::TPIDQ RoboClaw::getPIDQM1() { return g_sensor_value_group_.m1_pidq; }
+RoboClaw::TPIDQ RoboClaw::getPIDQM1() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  return g_sensor_value_group_.m1_pidq;
+}
 
-RoboClaw::TPIDQ RoboClaw::getPIDQM2() { return g_sensor_value_group_.m2_pidq; }
+RoboClaw::TPIDQ RoboClaw::getPIDQM2() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  return g_sensor_value_group_.m2_pidq;
+}
 
-float RoboClaw::getTemperature() { return g_sensor_value_group_.temperature; }
+float RoboClaw::getTemperature() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  return g_sensor_value_group_.temperature;
+}
 
 unsigned long RoboClaw::getUlongCommandResult2(uint8_t command) {
   uint16_t crc = 0;
@@ -278,6 +292,7 @@ uint32_t RoboClaw::getULongCont2(uint16_t &crc) {
 }
 
 int32_t RoboClaw::getVelocity(kMotor motor) {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   if (motor == kM1) {
     return g_sensor_value_group_.m1_velocity;
   } else {
@@ -329,18 +344,22 @@ int32_t RoboClaw::getVelocityResult(uint8_t command) {
 }
 
 int32_t RoboClaw::getM1Encoder() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.m1_encoder_command_result.value;
 }
 
 int8_t RoboClaw::getM1EncoderStatus() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.m1_encoder_command_result.status;
 }
 
 int32_t RoboClaw::getM2Encoder() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.m2_encoder_command_result.value;
 }
 
 int8_t RoboClaw::getM2EncoderStatus() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return g_sensor_value_group_.m2_encoder_command_result.status;
 }
 
@@ -527,13 +546,17 @@ void RoboClaw::readSensorGroup() {
       if (time_since_last_attempt >= 5) {
         last_reconnect_attempt = now;
         RCUTILS_LOG_INFO("[RoboClaw::readSensorGroup] Attempting to reconnect...");
-        if (device_port_ >= 0) {
-          close(device_port_);
-          device_port_ = -1;
+        {
+          // Commands from other threads must not use the port mid-swap
+          std::lock_guard<std::mutex> lock(buffered_command_mutex_);
+          if (device_port_ >= 0) {
+            close(device_port_);
+            device_port_ = -1;
+          }
+          // openPort() will throw if it fails, and set DISCONNECTED state
+          // The exception will propagate up and prevent sensor reading
+          openPort();
         }
-        // openPort() will throw if it fails, and set DISCONNECTED state
-        // The exception will propagate up and prevent sensor reading
-        openPort();
         // A USB drop can also mean the RoboClaw browned out and reset, so
         // restore the settings it would have lost before reading sensors
         reapplyConfiguration();
@@ -578,33 +601,34 @@ void RoboClaw::readSensorGroup() {
     uint32_t status = 0;
     CmdReadStatus cmd_read_status(*this, status);
     cmd_read_status.execute();
-    g_sensor_value_group_.error_status = status;
-    g_sensor_value_group_.error_string = singleton()->getErrorString(status);
+    std::string error_string = getErrorString(status);
     
     // Append connection state if disconnected
     if (connection_state_ == DISCONNECTED) {
-      if (g_sensor_value_group_.error_string.empty() || 
-          g_sensor_value_group_.error_string == "normal") {
-        g_sensor_value_group_.error_string = "[DISCONNECTED] ";
+      if (error_string.empty() || error_string == "normal") {
+        error_string = "[DISCONNECTED] ";
       } else {
-        g_sensor_value_group_.error_string += "[DISCONNECTED] ";
+        error_string += "[DISCONNECTED] ";
       }
     }
     
     // Append current protection status if not normal
-    if (current_protection_state_ != NORMAL) {
+    OverCurrentState protection_state = current_protection_state_.load();
+    if (protection_state != NORMAL) {
       const char* state_names[] = {"NORMAL", "OVER_CURRENT_WARNING", 
                                     "RECOVERY_WAITING", "RECOVERING"};
-      if (g_sensor_value_group_.error_string.empty() || 
-          g_sensor_value_group_.error_string == "normal") {
-        g_sensor_value_group_.error_string = "[";
+      if (error_string.empty() || error_string == "normal") {
+        error_string = "[";
       } else {
-        g_sensor_value_group_.error_string += "[";
+        error_string += "[";
       }
-      g_sensor_value_group_.error_string += state_names[current_protection_state_];
-      g_sensor_value_group_.error_string += "] ";
+      error_string += state_names[protection_state];
+      error_string += "] ";
     }
     
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    g_sensor_value_group_.error_status = status;
+    g_sensor_value_group_.error_string = error_string;
     g_sensor_value_group_.logic_battery_level = logic_battery_level;
     g_sensor_value_group_.m1_encoder_command_result = m1_encoder_command_result;
     g_sensor_value_group_.m1_pidq = m1_read_velocity_pidq_result;
@@ -616,7 +640,7 @@ void RoboClaw::readSensorGroup() {
 
     // Call getMotorCurrents before getMotorAlarms;
     g_sensor_value_group_.motor_currents = motor_currents;
-    g_sensor_value_group_.motor_alarms = singleton()->getMotorAlarms();
+    g_sensor_value_group_.motor_alarms = motorAlarms_.load();
     g_sensor_value_group_.temperature = temperature;
     g_sensor_value_group_.last_sensor_read_time_ = std::chrono::system_clock::now();
   }
@@ -654,21 +678,21 @@ void RoboClaw::restartPort() {
 }
 
 void RoboClaw::setM1PID(float p, float i, float d, uint32_t qpps) {
+  CmdSetPid command(*this, kM1, p, i, d, qpps);
+  command.execute();
   m1_pid_config_.p = p;
   m1_pid_config_.i = i;
   m1_pid_config_.d = d;
   m1_pid_config_.qpps = qpps;
-  CmdSetPid command(*this, kM1, p, i, d, qpps);
-  command.execute();
 }
 
 void RoboClaw::setM2PID(float p, float i, float d, uint32_t qpps) {
+  CmdSetPid command(*this, kM2, p, i, d, qpps);
+  command.execute();
   m2_pid_config_.p = p;
   m2_pid_config_.i = i;
   m2_pid_config_.d = d;
   m2_pid_config_.qpps = qpps;
-  CmdSetPid command(*this, kM2, p, i, d, qpps);
-  command.execute();
 }
 
 void RoboClaw::reapplyConfiguration() {
@@ -679,7 +703,6 @@ void RoboClaw::reapplyConfiguration() {
 }
 
 void RoboClaw::setSerialTimeout(float timeout_seconds) {
-  serial_timeout_config_ = timeout_seconds;
   // Convert seconds to tenths of seconds (0.1s units)
   // Clamp to valid range: 0-255 tenths = 0.0-25.5 seconds
   float timeout_tenths_float = timeout_seconds * 10.0f;
@@ -695,6 +718,7 @@ void RoboClaw::setSerialTimeout(float timeout_seconds) {
   
   CmdSetSerialTimeout command(*this, timeout_tenths);
   command.execute();
+  serial_timeout_config_ = timeout_seconds;
 }
 
 float RoboClaw::getSerialTimeout() {
@@ -799,24 +823,33 @@ void RoboClaw::setCurrentProtectionParams(float filter_window_seconds,
                                            float recovery_timeout_seconds,
                                            float sensor_update_rate) {
   // Validate parameters
-  filter_window_seconds_ = std::max(0.0f, std::min(10.0f, filter_window_seconds));
   recovery_timeout_seconds_ = std::max(0.0f, std::min(60.0f, recovery_timeout_seconds));
-  sensor_update_rate_ = sensor_update_rate;
-  
-  updateBufferSize();
+  size_t buffer_size;
+  {
+    // The filter settings and buffers are used by addCurrentSample on the
+    // main loop thread
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    filter_window_seconds_ = std::max(0.0f, std::min(10.0f, filter_window_seconds));
+    sensor_update_rate_ = sensor_update_rate;
+    updateBufferSize();
+    buffer_size = max_buffer_size_;
+  }
   
   RCUTILS_LOG_INFO("[RoboClaw::setCurrentProtectionParams] filter_window: %.2f, "
                    "recovery_timeout: %.2f, sensor_rate: %.2f, max_buffer_size: %zu, "
                    "maxM1Current: %.2f, maxM2Current: %.2f",
-                   filter_window_seconds_, recovery_timeout_seconds_, 
-                   sensor_update_rate_, max_buffer_size_,
-                   maxM1Current_, maxM2Current_);
+                   filter_window_seconds, recovery_timeout_seconds_.load(), 
+                   sensor_update_rate, buffer_size,
+                   maxM1Current_.load(), maxM2Current_.load());
 }
 
 void RoboClaw::notifyCmdVel(bool is_zero) {
   if (!is_zero) {
     // Track when non-zero cmd_vel is received
-    last_nonzero_cmd_vel_time_ = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      last_nonzero_cmd_vel_time_ = std::chrono::steady_clock::now();
+    }
     
     // If in recovery, abort and go back to warning
     if (current_protection_state_ == RECOVERY_WAITING) {
@@ -826,6 +859,7 @@ void RoboClaw::notifyCmdVel(bool is_zero) {
 }
 
 void RoboClaw::addCurrentSample(float m1_current, float m2_current) {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   if (filter_window_seconds_ > 0.0) {
     // Add to history buffers
     m1_current_history_.push_back(m1_current);
@@ -851,10 +885,8 @@ void RoboClaw::addCurrentSample(float m1_current, float m2_current) {
 
 void RoboClaw::updateBufferSize() {
   if (filter_window_seconds_ > 0.0) {
-    max_buffer_size_ = std::min(
-        (size_t)(filter_window_seconds_ * sensor_update_rate_),
-        (size_t)(10.0 * sensor_update_rate_)  // Hard cap at 10 seconds
-    );
+    max_buffer_size_ =
+        drive_logic::currentBufferSize(filter_window_seconds_, sensor_update_rate_);
     
     // Trim buffers if they exceed new size
     while (m1_current_history_.size() > max_buffer_size_) {
@@ -884,11 +916,13 @@ float RoboClaw::calculateAverage(const std::deque<float>& history) const {
 }
 
 void RoboClaw::transitionState(OverCurrentState new_state, const char* reason) {
-  if (new_state != current_protection_state_) {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  OverCurrentState old_state = current_protection_state_.load();
+  if (new_state != old_state) {
     const char* state_names[] = {"NORMAL", "OVER_CURRENT_WARNING", 
                                   "RECOVERY_WAITING", "RECOVERING"};
     RCUTILS_LOG_INFO("[RoboClaw::CurrentProtection] State: %s -> %s (%s)",
-                     state_names[current_protection_state_],
+                     state_names[old_state],
                      state_names[new_state], reason);
     current_protection_state_ = new_state;
     
@@ -907,17 +941,20 @@ void RoboClaw::transitionState(OverCurrentState new_state, const char* reason) {
 // Connection state management methods
 
 void RoboClaw::setConnectionState(ConnectionState new_state, const char* reason) {
-  if (new_state != connection_state_) {
+  ConnectionState old_state = connection_state_.exchange(new_state);
+  if (new_state != old_state) {
     const char* state_names[] = {"CONNECTED", "DISCONNECTED"};
     RCUTILS_LOG_WARN("[RoboClaw::ConnectionState] State: %s -> %s (%s)",
-                     state_names[connection_state_],
+                     state_names[old_state],
                      state_names[new_state], reason);
-    connection_state_ = new_state;
   }
 }
 
 void RoboClaw::recordSuccessfulCommunication() {
-  last_successful_communication_ = std::chrono::steady_clock::now();
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    last_successful_communication_ = std::chrono::steady_clock::now();
+  }
   total_messages_++;
   
   if (consecutive_errors_ > 0) {
@@ -934,21 +971,9 @@ void RoboClaw::recordFailedCommunication(const TRoboClawException& e) {
   total_messages_++;
   total_errors_++;
   
-  // Update error statistics
-  error_stats_.last_error_message = e.what();
-  error_stats_.last_error_time = std::chrono::steady_clock::now();
-  
-  // Classify error type
-  if (dynamic_cast<const TimeoutException*>(&e)) {
-    error_stats_.total_timeouts++;
-  } else if (dynamic_cast<const CrcException*>(&e)) {
-    error_stats_.total_crc_errors++;
-  } else if (dynamic_cast<const InvalidResponseException*>(&e)) {
-    error_stats_.total_ack_errors++;
-  } else if (dynamic_cast<const DeviceNotRespondingException*>(&e)) {
-    error_stats_.total_device_not_responding++;
-  } else if (dynamic_cast<const CommunicationException*>(&e)) {
-    error_stats_.total_communication_errors++;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    classifyError(e);
   }
   
   if (consecutive_errors_ >= error_threshold_ && connection_state_ == CONNECTED) {
@@ -959,10 +984,14 @@ void RoboClaw::recordFailedCommunication(const TRoboClawException& e) {
 void RoboClaw::recordError(const TRoboClawException& e) {
   // Update error statistics without affecting connection state or consecutive error count
   // This is used to track errors that were recovered via retry
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  classifyError(e);
+}
+
+void RoboClaw::classifyError(const TRoboClawException& e) {
   error_stats_.last_error_message = e.what();
   error_stats_.last_error_time = std::chrono::steady_clock::now();
   
-  // Classify error type
   if (dynamic_cast<const TimeoutException*>(&e)) {
     error_stats_.total_timeouts++;
   } else if (dynamic_cast<const CrcException*>(&e)) {
@@ -974,4 +1003,16 @@ void RoboClaw::recordError(const TRoboClawException& e) {
   } else if (dynamic_cast<const CommunicationException*>(&e)) {
     error_stats_.total_communication_errors++;
   }
+}
+
+void RoboClaw::clearCurrentFault() {
+  {
+    // Drop old samples so the cleared fault doesn't re-trip on stale averages
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    m1_current_history_.clear();
+    m2_current_history_.clear();
+    m1_current_average_ = 0.0;
+    m2_current_average_ = 0.0;
+  }
+  transitionState(NORMAL, "cleared by request");
 }

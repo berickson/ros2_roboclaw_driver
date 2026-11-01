@@ -12,6 +12,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <string>
 
+#include "drive_logic.h"
 #include "roboclaw.h"
 
 MotorDriver::MotorDriver()
@@ -22,7 +23,8 @@ MotorDriver::MotorDriver()
       m2_commanded_velocity_mps_(0.0),
       coast_timeout_seconds_(0.5),
       last_cmd_vel_time_(rclcpp::Time(0)),
-      is_coasting_(true) {
+      is_coasting_(true),
+      moving_(false) {
 }
 
 void MotorDriver::declareParameters() {
@@ -30,7 +32,7 @@ void MotorDriver::declareParameters() {
   rcl_interfaces::msg::ParameterDescriptor device_name_desc;
   device_name_desc.description = "Serial device path for RoboClaw";
   device_name_desc.read_only = true;
-  node_->declare_parameter<std::string>("device_name", "roboclaw", device_name_desc);
+  node_->declare_parameter<std::string>("device_name", "/dev/roboclaw", device_name_desc);
   
   rcl_interfaces::msg::ParameterDescriptor baud_rate_desc;
   baud_rate_desc.description = "Serial baud rate (must match RoboClaw config)";
@@ -39,7 +41,7 @@ void MotorDriver::declareParameters() {
   baud_rate_desc.integer_range[0].from_value = 9600;
   baud_rate_desc.integer_range[0].to_value = 460800;
   baud_rate_desc.integer_range[0].step = 0;
-  node_->declare_parameter<int>("baud_rate", 38400, baud_rate_desc);
+  node_->declare_parameter<int>("baud_rate", 115200, baud_rate_desc);
   
   rcl_interfaces::msg::ParameterDescriptor device_port_desc;
   device_port_desc.description = "RoboClaw device address on serial bus";
@@ -48,7 +50,7 @@ void MotorDriver::declareParameters() {
   device_port_desc.integer_range[0].from_value = 128;
   device_port_desc.integer_range[0].to_value = 135;
   device_port_desc.integer_range[0].step = 1;
-  node_->declare_parameter<int>("device_port", 123, device_port_desc);
+  node_->declare_parameter<int>("device_port", 128, device_port_desc);
   
   rcl_interfaces::msg::ParameterDescriptor serial_timeout_desc;
   serial_timeout_desc.description = "Timeout for serial communication in seconds (0.0=disabled)";
@@ -61,10 +63,10 @@ void MotorDriver::declareParameters() {
   
   // 2. Robot Geometry (Read-Only, require restart)
   rcl_interfaces::msg::ParameterDescriptor wheel_separation_desc;
-  wheel_separation_desc.description = "Distance between left and right wheel contact points (meters)";
+  wheel_separation_desc.description = "Distance between left and right wheel contact points (meters). Required.";
   wheel_separation_desc.read_only = true;
   wheel_separation_desc.floating_point_range.resize(1);
-  wheel_separation_desc.floating_point_range[0].from_value = 0.1;
+  wheel_separation_desc.floating_point_range[0].from_value = 0.0;
   wheel_separation_desc.floating_point_range[0].to_value = 2.0;
   wheel_separation_desc.floating_point_range[0].step = 0.0;
   node_->declare_parameter<float>("wheel_separation", 0.0, wheel_separation_desc);
@@ -79,10 +81,10 @@ void MotorDriver::declareParameters() {
   node_->declare_parameter<float>("meters_per_quad_pulse", 0.0, meters_per_quad_pulse_desc);
   
   rcl_interfaces::msg::ParameterDescriptor wheel_radius_desc;
-  wheel_radius_desc.description = "DEPRECATED: Use meters_per_quad_pulse instead. Wheel radius in meters";
+  wheel_radius_desc.description = "UNUSED: kept so old configs still load. Wheel radius in meters";
   wheel_radius_desc.read_only = true;
   wheel_radius_desc.floating_point_range.resize(1);
-  wheel_radius_desc.floating_point_range[0].from_value = 0.01;
+  wheel_radius_desc.floating_point_range[0].from_value = 0.0;
   wheel_radius_desc.floating_point_range[0].to_value = 0.5;
   wheel_radius_desc.floating_point_range[0].step = 0.0;
   node_->declare_parameter<float>("wheel_radius", 0.0, wheel_radius_desc);
@@ -91,16 +93,16 @@ void MotorDriver::declareParameters() {
   quad_pulses_per_meter_desc.description = "DEPRECATED: Use meters_per_quad_pulse instead. Encoder counts per meter";
   quad_pulses_per_meter_desc.read_only = true;
   quad_pulses_per_meter_desc.integer_range.resize(1);
-  quad_pulses_per_meter_desc.integer_range[0].from_value = 100;
+  quad_pulses_per_meter_desc.integer_range[0].from_value = 0;
   quad_pulses_per_meter_desc.integer_range[0].to_value = 10000;
   quad_pulses_per_meter_desc.integer_range[0].step = 0;
   node_->declare_parameter<int>("quad_pulses_per_meter", 0, quad_pulses_per_meter_desc);
   
   rcl_interfaces::msg::ParameterDescriptor quad_pulses_per_revolution_desc;
-  quad_pulses_per_revolution_desc.description = "DEPRECATED: Use meters_per_quad_pulse instead. Encoder counts per wheel revolution";
+  quad_pulses_per_revolution_desc.description = "Encoder counts per wheel revolution. Required when publish_joint_states is true";
   quad_pulses_per_revolution_desc.read_only = true;
   quad_pulses_per_revolution_desc.floating_point_range.resize(1);
-  quad_pulses_per_revolution_desc.floating_point_range[0].from_value = 100.0;
+  quad_pulses_per_revolution_desc.floating_point_range[0].from_value = 0.0;
   quad_pulses_per_revolution_desc.floating_point_range[0].to_value = 10000.0;
   quad_pulses_per_revolution_desc.floating_point_range[0].step = 0.0;
   node_->declare_parameter<float>("quad_pulses_per_revolution", 0, quad_pulses_per_revolution_desc);
@@ -177,7 +179,7 @@ void MotorDriver::declareParameters() {
   max_linear_velocity_desc.floating_point_range[0].from_value = 0.0;
   max_linear_velocity_desc.floating_point_range[0].to_value = 10.0;
   max_linear_velocity_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("max_linear_velocity", 0.0, max_linear_velocity_desc);
+  node_->declare_parameter<float>("max_linear_velocity", 2.0, max_linear_velocity_desc);
   
   rcl_interfaces::msg::ParameterDescriptor max_angular_velocity_desc;
   max_angular_velocity_desc.description = "Maximum rotation velocity (rad/s)";
@@ -185,7 +187,7 @@ void MotorDriver::declareParameters() {
   max_angular_velocity_desc.floating_point_range[0].from_value = 0.0;
   max_angular_velocity_desc.floating_point_range[0].to_value = 10.0;
   max_angular_velocity_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("max_angular_velocity", 0.0, max_angular_velocity_desc);
+  node_->declare_parameter<float>("max_angular_velocity", 2.0, max_angular_velocity_desc);
   
   rcl_interfaces::msg::ParameterDescriptor max_linear_acceleration_desc;
   max_linear_acceleration_desc.description = "Maximum linear acceleration (m/s^2). Set to 0.0 to use deprecated accel_quad_pulses_per_second instead.";
@@ -209,7 +211,7 @@ void MotorDriver::declareParameters() {
   m1_max_current_desc.floating_point_range[0].from_value = 0.0;
   m1_max_current_desc.floating_point_range[0].to_value = 50.0;
   m1_max_current_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m1_max_current", 0.0, m1_max_current_desc);
+  node_->declare_parameter<float>("m1_max_current", 10.0, m1_max_current_desc);
   
   rcl_interfaces::msg::ParameterDescriptor m2_max_current_desc;
   m2_max_current_desc.description = "Motor 2 current limit (trip threshold) in Amps";
@@ -217,7 +219,7 @@ void MotorDriver::declareParameters() {
   m2_max_current_desc.floating_point_range[0].from_value = 0.0;
   m2_max_current_desc.floating_point_range[0].to_value = 50.0;
   m2_max_current_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("m2_max_current", 0.0, m2_max_current_desc);
+  node_->declare_parameter<float>("m2_max_current", 10.0, m2_max_current_desc);
   
   // 5. Current Protection (Runtime changeable)
   rcl_interfaces::msg::ParameterDescriptor filter_desc;
@@ -229,7 +231,7 @@ void MotorDriver::declareParameters() {
   node_->declare_parameter<float>("current_filter_window_seconds", 1.0, filter_desc);
   
   rcl_interfaces::msg::ParameterDescriptor recovery_desc;
-  recovery_desc.description = "Seconds of zero cmd_vel before auto-recovery from over-current. 0.0=no auto-recovery";
+  recovery_desc.description = "Seconds of zero cmd_vel before auto-recovery from over-current. 0.0=no auto-recovery; clear the fault with the ~/clear_fault service";
   recovery_desc.floating_point_range.resize(1);
   recovery_desc.floating_point_range[0].from_value = 0.0;
   recovery_desc.floating_point_range[0].to_value = 60.0;
@@ -238,12 +240,12 @@ void MotorDriver::declareParameters() {
   
   // 6. Safety (Runtime changeable)
   rcl_interfaces::msg::ParameterDescriptor watchdog_desc;
-  watchdog_desc.description = "Watchdog timeout - stops motors if no cmd_vel received (seconds)";
+  watchdog_desc.description = "Watchdog timeout - stops motors if no cmd_vel received while moving (seconds). 0.0=disabled";
   watchdog_desc.floating_point_range.resize(1);
   watchdog_desc.floating_point_range[0].from_value = 0.0;
   watchdog_desc.floating_point_range[0].to_value = 5.0;
   watchdog_desc.floating_point_range[0].step = 0.0;
-  node_->declare_parameter<float>("max_seconds_uncommanded_travel", 0.0, watchdog_desc);
+  node_->declare_parameter<float>("max_seconds_uncommanded_travel", 0.5, watchdog_desc);
   
   rcl_interfaces::msg::ParameterDescriptor coast_timeout_desc;
   coast_timeout_desc.description = "Time without any cmd_vel message before automatically coasting motors to save power (seconds). Set to 0.0 to disable.";
@@ -344,6 +346,21 @@ void MotorDriver::initializeParameters() {
   }
 
   logParameters();
+  validateParameters();
+}
+
+void MotorDriver::validateParameters() const {
+  // Fail at startup with a clear message rather than drive or report odometry
+  // with a zero or missing calibration
+  if (wheel_separation_ <= 0.0) {
+    throw std::runtime_error("wheel_separation must be set (meters between wheel contact points)");
+  }
+  if (meters_per_quad_pulse_ <= 0.0) {
+    throw std::runtime_error("meters_per_quad_pulse (or deprecated quad_pulses_per_meter) must be set");
+  }
+  if (publish_joint_states_ && quad_pulses_per_revolution_ <= 0.0) {
+    throw std::runtime_error("quad_pulses_per_revolution must be set when publish_joint_states is true");
+  }
 }
 
 void MotorDriver::logParameters() const {
@@ -387,11 +404,15 @@ void MotorDriver::logParameters() const {
 void MotorDriver::cmdVelCallback(
     const geometry_msgs::msg::Twist::SharedPtr msg) {
   if (RoboClaw::singleton() != nullptr) {
-    // Always update last cmd_vel time when ANY cmd_vel is received (regardless of value)
-    last_cmd_vel_time_ = node_->now();
-    
-    // Any cmd_vel message (even zero) takes control back from coast mode
-    is_coasting_ = false;
+    bool is_zero = (msg->linear.x == 0) && (msg->angular.z == 0);
+    {
+      std::lock_guard<std::mutex> lock(cmd_state_mutex_);
+      // Always update last cmd_vel time when ANY cmd_vel is received (regardless of value)
+      last_cmd_vel_time_ = node_->now();
+      // Any cmd_vel message (even zero) takes control back from coast mode
+      is_coasting_ = false;
+      moving_ = !is_zero;
+    }
     
     // Check connection state first
     if (RoboClaw::singleton()->getConnectionState() == RoboClaw::DISCONNECTED) {
@@ -408,7 +429,6 @@ void MotorDriver::cmdVelCallback(
     double yaw_velocity =
       std::clamp((float)msg->angular.z, -max_angular_velocity_, max_angular_velocity_);
     
-    bool is_zero = (msg->linear.x == 0) && (msg->angular.z == 0);
     RoboClaw::singleton()->notifyCmdVel(is_zero);
     
     // Block movement commands if in fault state
@@ -425,10 +445,10 @@ void MotorDriver::cmdVelCallback(
       m2_commanded_velocity_mps_ = 0.0;
     // } else if ((fabs(x_velocity) > 0.01) || (fabs(yaw_velocity) > 0.01)) {
     } else {
-      const double m1_desired_velocity =
-          x_velocity - (yaw_velocity * wheel_separation_ / 2.0);
-      const double m2_desired_velocity =
-          x_velocity + (yaw_velocity * wheel_separation_ / 2.0);
+      const drive_logic::WheelSpeeds wheels =
+          drive_logic::wheelSpeedsFromTwist(x_velocity, yaw_velocity, wheel_separation_);
+      const double m1_desired_velocity = wheels.left;
+      const double m2_desired_velocity = wheels.right;
 
       // Store commanded velocities in m/s for monitoring
       m1_commanded_velocity_mps_ = m1_desired_velocity;
@@ -453,6 +473,8 @@ void MotorDriver::cmdVelCallback(
 
 void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
   node_ = node;
+  // Use the node's clock type; subtracting times from different clocks throws
+  last_cmd_vel_time_ = node_->now();
   declareParameters();
   initializeParameters();
   
@@ -499,6 +521,11 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
   };
   param_callback_handle_ = node_->add_on_set_parameters_callback(param_callback);
 
+  clear_fault_service_ = node_->create_service<std_srvs::srv::Trigger>(
+      "~/clear_fault",
+      std::bind(&MotorDriver::clearFaultCallback, this, std::placeholders::_1,
+                std::placeholders::_2));
+
   if (publish_joint_states_) {
     joint_state_publisher_ =
         node_->create_publisher<sensor_msgs::msg::JointState>("joint_states",
@@ -510,13 +537,75 @@ void MotorDriver::onInit(rclcpp::Node::SharedPtr node) {
         node_->create_publisher<nav_msgs::msg::Odometry>("odom", qos);
   }
 
-  // Start the main loop thread if we are publishing joint states or odometry
-  // messages. This thread reads RoboClaw sensors, checks safety conditions
-  // (watchdog timeout, coast timeout), and publishes status/odometry/joint states
-  // at the specified sensor update rate. Similar to Arduino's loop() function.
+  // Start the main loop thread. This thread reads RoboClaw sensors, runs
+  // over-current protection and reconnection, checks safety conditions
+  // (watchdog timeout, coast timeout), and publishes odometry/joint states
+  // when enabled, at the specified sensor update rate. It always runs, since
+  // the safety checks are needed even when nothing is published.
   // The thread will run until the node is shut down.
-  if (publish_joint_states_ || publish_odom_) {
-    this->main_loop_thread_ = std::thread(&MotorDriver::mainLoopThread, this);
+  this->main_loop_thread_ = std::thread(&MotorDriver::mainLoopThread, this);
+}
+
+void MotorDriver::clearFaultCallback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+  if (RoboClaw::singleton() == nullptr) {
+    response->success = false;
+    response->message = "RoboClaw not initialized";
+    return;
+  }
+  if (RoboClaw::singleton()->getCurrentProtectionState() == RoboClaw::NORMAL) {
+    response->success = true;
+    response->message = "No over-current fault active";
+    return;
+  }
+  RoboClaw::singleton()->clearCurrentFault();
+  response->success = true;
+  response->message = "Over-current fault cleared";
+}
+
+void MotorDriver::checkCommandTimeouts() {
+  // Called from mainLoopThread after a successful sensor read
+  bool watchdog_expired = false;
+  bool coast_due = false;
+  rclcpp::Time checked_cmd_time;
+  {
+    std::lock_guard<std::mutex> lock(cmd_state_mutex_);
+    checked_cmd_time = last_cmd_vel_time_;
+    double since_cmd = (node_->now() - last_cmd_vel_time_).seconds();
+    watchdog_expired = drive_logic::watchdogExpired(
+        moving_, since_cmd, max_seconds_uncommanded_travel_);
+    coast_due = coast_timeout_seconds_ > 0.0 && !is_coasting_ &&
+                since_cmd > coast_timeout_seconds_;
+  }
+
+  if (watchdog_expired) {
+    RCUTILS_LOG_WARN("[MotorDriver::checkCommandTimeouts] No cmd_vel for %.2fs while moving, stopping motors",
+                     max_seconds_uncommanded_travel_);
+    RoboClaw::singleton()->stop();
+    m1_commanded_velocity_mps_ = 0.0;
+    m2_commanded_velocity_mps_ = 0.0;
+    // Only clear if no new command arrived while stopping; if stop() threw,
+    // moving_ stays set and the stop is retried next cycle. Restart the coast
+    // timer so the motors brake for coast_timeout_seconds before coasting,
+    // instead of coasting in the same cycle and rolling to a stop.
+    std::lock_guard<std::mutex> lock(cmd_state_mutex_);
+    if (last_cmd_vel_time_ == checked_cmd_time) {
+      moving_ = false;
+      last_cmd_vel_time_ = node_->now();
+    }
+    return;
+  }
+
+  if (coast_due) {
+    // Timeout exceeded - coast the motors to save power
+    RCUTILS_LOG_INFO("[MotorDriver::mainLoopThread] Coast timeout (%.2fs) exceeded, coasting motors",
+                    coast_timeout_seconds_);
+    RoboClaw::singleton()->coast();
+    std::lock_guard<std::mutex> lock(cmd_state_mutex_);
+    if (last_cmd_vel_time_ == checked_cmd_time) {
+      is_coasting_ = true;
+    }
   }
 }
 
@@ -579,13 +668,15 @@ void MotorDriver::mainLoopThread() {
         double dt = (now - last_time).seconds();
         last_time = now;
 
-        // Get velocities in quad pulses per second and convert to m/s
-        float linear_velocity_x =
+        // Get wheel velocities in quad pulses per second and convert to m/s
+        const double left_velocity =
             RoboClaw::singleton()->getVelocity(RoboClaw::kM1) * g_singleton->meters_per_quad_pulse_;
-        float linear_velocity_y =
+        const double right_velocity =
             RoboClaw::singleton()->getVelocity(RoboClaw::kM2) * g_singleton->meters_per_quad_pulse_;
-        float angular_velocity_z = (linear_velocity_x - linear_velocity_y) /
-                                   g_singleton->wheel_separation_;
+        const drive_logic::BodyVelocity body = drive_logic::twistFromWheelSpeeds(
+            left_velocity, right_velocity, g_singleton->wheel_separation_);
+        float linear_velocity_x = body.linear;
+        float angular_velocity_z = body.angular;
 
         // Calculate the robot's position and orientation
         static float x_pos_(0.0);
@@ -601,10 +692,8 @@ void MotorDriver::mainLoopThread() {
         float delta_heading = angular_velocity_z * dt;  // radians
         float cos_h = cos(heading_);
         float sin_h = sin(heading_);
-        float delta_x =
-            (linear_velocity_x * cos_h - linear_velocity_y * sin_h) * dt;  // m
-        float delta_y =
-            (linear_velocity_x * sin_h + linear_velocity_y * cos_h) * dt;  // m
+        float delta_x = linear_velocity_x * cos_h * dt;  // m
+        float delta_y = linear_velocity_x * sin_h * dt;  // m
         // calculate current position of the robot
         x_pos_ += delta_x;
         y_pos_ += delta_y;
@@ -628,7 +717,7 @@ void MotorDriver::mainLoopThread() {
         odometry_msg.pose.covariance[35] = 0.001;
 
         odometry_msg.twist.twist.linear.x = linear_velocity_x;
-        odometry_msg.twist.twist.linear.y = linear_velocity_y;
+        odometry_msg.twist.twist.linear.y = 0.0;
         odometry_msg.twist.twist.linear.z = 0.0;
         odometry_msg.twist.twist.angular.x = 0.0;
         odometry_msg.twist.twist.angular.y = 0.0;
@@ -636,19 +725,7 @@ void MotorDriver::mainLoopThread() {
         g_singleton->odom_publisher_->publish(odometry_msg);
       }
       
-      // Check coast timeout (if enabled and not already coasting)
-      if (coast_timeout_seconds_ > 0.0 && !is_coasting_) {
-        // Calculate time since last cmd_vel message
-        auto time_since_last_cmd_vel = (node_->now() - last_cmd_vel_time_).seconds();
-        
-        if (time_since_last_cmd_vel > coast_timeout_seconds_) {
-          // Timeout exceeded - coast the motors to save power
-          RCUTILS_LOG_INFO("[MotorDriver::mainLoopThread] Coast timeout (%.2fs) exceeded, coasting motors",
-                          coast_timeout_seconds_);
-          RoboClaw::singleton()->coast();
-          is_coasting_ = true;
-        }
-      }
+      checkCommandTimeouts();
       
       // If we successfully read sensors, reset the disconnection log flag
       logged_disconnection = false;
@@ -686,10 +763,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     if (name == "m1_pid_p") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m1_pid_p_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
+          RoboClaw::singleton()->setM1PID(new_value, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
         }
+        m1_pid_p_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_p to %.2f", new_value);
       } else {
         result.successful = false;
@@ -699,10 +777,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m1_pid_i") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m1_pid_i_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, new_value, m1_pid_d_, m1_pid_qpps_max_);
         }
+        m1_pid_i_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_i to %.2f", new_value);
       } else {
         result.successful = false;
@@ -712,10 +791,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m1_pid_d") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m1_pid_d_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, new_value, m1_pid_qpps_max_);
         }
+        m1_pid_d_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_d to %.2f", new_value);
       } else {
         result.successful = false;
@@ -725,10 +805,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m1_pid_qpps_max") {
       int new_value = param.as_int();
       if (new_value >= 0 && new_value <= 1000000) {
-        m1_pid_qpps_max_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, m1_pid_qpps_max_);
+          RoboClaw::singleton()->setM1PID(m1_pid_p_, m1_pid_i_, m1_pid_d_, new_value);
         }
+        m1_pid_qpps_max_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m1_pid_qpps_max to %d", new_value);
       } else {
         result.successful = false;
@@ -738,10 +819,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m2_pid_p") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m2_pid_p_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
+          RoboClaw::singleton()->setM2PID(new_value, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
         }
+        m2_pid_p_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_p to %.2f", new_value);
       } else {
         result.successful = false;
@@ -751,10 +833,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m2_pid_i") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m2_pid_i_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, new_value, m2_pid_d_, m2_pid_qpps_max_);
         }
+        m2_pid_i_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_i to %.2f", new_value);
       } else {
         result.successful = false;
@@ -764,10 +847,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m2_pid_d") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 100000.0) {
-        m2_pid_d_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, new_value, m2_pid_qpps_max_);
         }
+        m2_pid_d_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_d to %.2f", new_value);
       } else {
         result.successful = false;
@@ -777,10 +861,11 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "m2_pid_qpps_max") {
       int new_value = param.as_int();
       if (new_value >= 0 && new_value <= 1000000) {
-        m2_pid_qpps_max_ = new_value;
+        // Write to the device first so a failed write leaves the old value
         if (RoboClaw::singleton() != nullptr) {
-          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, m2_pid_qpps_max_);
+          RoboClaw::singleton()->setM2PID(m2_pid_p_, m2_pid_i_, m2_pid_d_, new_value);
         }
+        m2_pid_qpps_max_ = new_value;
         RCLCPP_INFO(node_->get_logger(), "Updated m2_pid_qpps_max to %d", new_value);
       } else {
         result.successful = false;
@@ -888,7 +973,10 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     else if (name == "max_seconds_uncommanded_travel") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 5.0) {
-        max_seconds_uncommanded_travel_ = new_value;
+        {
+          std::lock_guard<std::mutex> lock(cmd_state_mutex_);
+          max_seconds_uncommanded_travel_ = new_value;
+        }
         RCLCPP_INFO(node_->get_logger(), "Updated max_seconds_uncommanded_travel to %.2f s", new_value);
       } else {
         result.successful = false;
@@ -898,7 +986,10 @@ rcl_interfaces::msg::SetParametersResult MotorDriver::parametersCallback(
     } else if (name == "coast_timeout_seconds") {
       float new_value = param.as_double();
       if (new_value >= 0.0 && new_value <= 60.0) {
-        coast_timeout_seconds_ = new_value;
+        {
+          std::lock_guard<std::mutex> lock(cmd_state_mutex_);
+          coast_timeout_seconds_ = new_value;
+        }
         RCLCPP_INFO(node_->get_logger(), "Updated coast_timeout_seconds to %.2f s (0.0=disabled)", new_value);
       } else {
         result.successful = false;

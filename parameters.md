@@ -19,10 +19,13 @@ Physical robot dimensions. **Requires node restart.**
 
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
-| `wheel_separation` | float | 0.345 | 0.1-2.0 m | Distance between left and right wheel contact points |
-| `meters_per_quad_pulse` | float | 0.000701 | 0.00001-0.01 | Linear distance traveled per encoder count |
+| `wheel_separation` | float | required | 0.0-2.0 m | Distance between left and right wheel contact points |
+| `meters_per_quad_pulse` | float | required | 0.0-0.01 | Linear distance traveled per encoder count |
+| `quad_pulses_per_revolution` | float | 0.0 | 0.0-10000.0 | Encoder counts per wheel revolution. Required when `publish_joint_states` is true |
 
-**Deprecated:** `wheel_radius`, `quad_pulses_per_meter`, `quad_pulses_per_revolution` (use `meters_per_quad_pulse`)
+The node exits at startup with an error if a required value is missing.
+
+**Deprecated:** `quad_pulses_per_meter` (use `meters_per_quad_pulse`). `wheel_radius` is unused and only accepted so old configs still load.
 
 ---
 
@@ -70,6 +73,12 @@ Over-current protection configuration. **Runtime changeable.**
 | `current_filter_window_seconds` | float | 1.0 | 0.0-10.0 s | Time window for averaging current readings (0.0=instantaneous) |
 | `recovery_timeout_seconds` | float | 5.0 | 0.0-60.0 s | Seconds of zero cmd_vel before auto-recovery (0.0=no auto-recovery) |
 
+A latched fault (or any active fault) can be cleared by hand:
+
+```bash
+ros2 service call /roboclaw/clear_fault std_srvs/srv/Trigger
+```
+
 ---
 
 ## Safety
@@ -78,7 +87,7 @@ Watchdog timeout. **Runtime changeable.**
 
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
-| `max_seconds_uncommanded_travel` | float | 0.01 | 0.0-5.0 s | Stops motors if no cmd_vel received within this time |
+| `max_seconds_uncommanded_travel` | float | 0.5 | 0.0-5.0 s | Stops motors if they are moving and no cmd_vel arrives within this time (0.0=disabled). Keep it longer than your cmd_vel interval |
 | `coast_timeout_seconds` | float | 0.5 | 0.0-60.0 s | Time without cmd_vel before releasing motor holding torque (0.0=disabled) |
 
 ---

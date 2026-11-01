@@ -16,14 +16,17 @@ and used on the [red-crash](https://github.com/berickson/red-crash) robot.
   (`meters_per_quad_pulse`).
 - **Over-current protection.** Motor currents are averaged over a window and
   act as a slow fuse that stops the motors, then auto-recovers after a period
-  of zero `cmd_vel`.
-- **Coast mode.** Motors coast (no holding power) when `cmd_vel` stops for
+  of zero `cmd_vel`, or on `ros2 service call /roboclaw/clear_fault std_srvs/srv/Trigger`.
+- **Watchdog and coast.** Motors stop if `cmd_vel` goes quiet while moving
+  (`max_seconds_uncommanded_travel`), and coast (no holding power) after
   `coast_timeout_seconds`.
 - **Diagnostics.** Connection state, error counts, batteries, currents and
   temperature are published on `/diagnostics`.
 - **Runtime parameters.** PID, limits, current protection and debug settings
   can be changed with `ros2 param set`. See [parameters.md](parameters.md).
-- **Fixes.** SetDutyCycle byte count, negative odometry readings.
+- **Fixes.** Turn rate units, odometry kinematics, SetDutyCycle byte count,
+  negative odometry readings, thread safety between the command and sensor
+  threads.
 - **Message change.** `connection_state` was removed from `RoboClawStatus`;
   it is in diagnostics instead.
 
@@ -40,6 +43,16 @@ Settings live in `config/motor_driver.yaml`; every parameter is described in
 
 Upstream's [README](https://github.com/wimblerobotics/ros2_roboclaw_driver#readme)
 covers Raspberry Pi UART wiring; much of the rest no longer matches this fork.
+
+## Tests
+
+Unit tests cover the drive kinematics, odometry, current filter, over-current
+state machine and watchdog. They need no hardware:
+
+```bash
+colcon build --packages-select ros2_roboclaw_driver
+./build/ros2_roboclaw_driver/test_drive_logic
+```
 
 ## Remotes
 

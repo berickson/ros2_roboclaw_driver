@@ -3,15 +3,12 @@
 # https://resources.basicmicro.com/auto-tuning-with-motion-studio/
 # for a description of how to derive the p, i, d and qpps values.
 #
-# This configuration file is set up and an example for use with
-# A Raspberry PI 5 using a UART to connect to a RoboClaw motor driver.
-# See the README.md file for more information on how to set up
-# the RoboClaw and the Raspberry PI and how to set values in this file.
+# Every parameter is described in parameters.md.
 
 motor_driver_node:
   ros__parameters:
-    # Incremental acceleration to use in quadrature pulses per second.
-    accel_quad_pulses_per_second: 5000
+    # Maximum linear acceleration in m/s^2.
+    max_linear_acceleration: 3.5
 
     # The device name to be opened. Change this to your actual device you are using.
     # Both USB and UART devices are supported. The device name is the
@@ -32,10 +29,10 @@ motor_driver_node:
     m2_pid_p: 10.0
     m2_pid_i: 0.0
     m2_pid_d: 0.0
-    m2_pid_qpps: 2437
+    m2_pid_qpps_max: 2437
 
-    # The maximum expected current (in amps) for both motors.
-    # Used just to signal warnings.
+    # Over-current trip threshold (in amps) for each motor. The averaged
+    # current above this stops the motors (see current protection below).
     m1_max_current: 6.0
     m2_max_current: 6.0
 
@@ -44,31 +41,34 @@ motor_driver_node:
     max_angular_velocity: 2.0
     max_linear_velocity: 2.0
 
-    # If no new motor commands is received since the last motor
-    # command in this number of seconds, stop the motors.
+    # Watchdog: if the motors are moving and no cmd_vel arrives for this
+    # many seconds, stop them. Keep it longer than your cmd_vel interval.
+    # 0.0 = disabled.
     max_seconds_uncommanded_travel: 0.5
+
+    # Coast (release holding torque) after this many seconds without
+    # cmd_vel. 0.0 = disabled.
+    coast_timeout_seconds: 0.5
 
     publish_joint_states: false
     publish_odom: true
 
     # Based upon your particular motor gearing and encoders.
-    # These values are used to scale cmd_vel commands
-    # and encoder values to motor commands and odometry, respectfully.
-    quad_pulses_per_meter: 1426
+    # Meters traveled per encoder count scales cmd_vel to motor commands
+    # and encoder values to odometry. Counts per revolution is only needed
+    # for joint states.
+    meters_per_quad_pulse: 0.000701  # 1 / 1426 counts per meter
     quad_pulses_per_revolution: 537.0
 
-    # Based upon your particular robot model.
-    # The wheel separation and radius, in meters.
-    wheel_radius: 0.06
+    # Distance between the left and right wheel contact points, in meters.
     wheel_separation: 0.414
 
     # Topic name to be used to publish the RoboClaw status messages.
     roboclaw_status_topic: "roboclaw_status"
 
     # How often, in Hz, to sense the various RoboClaw internal values.
-    # This is the rate that Joint State, Odomentry and
-    # RoboClaw status messages are published.
-    sensor_rate_hz: 20.0
+    # This is the rate that Joint State and Odometry messages are published.
+    sensor_update_rate: 20.0
 
     # Current protection parameters
     # Time window (in seconds) for averaging motor current readings
@@ -78,7 +78,7 @@ motor_driver_node:
     
     # Recovery timeout (in seconds) - time of zero cmd_vel required 
     # before auto-recovery from over-current condition
-    # 0.0 = disabled (no auto-recovery, requires manual intervention)
+    # 0.0 = disabled (no auto-recovery; clear with the ~/clear_fault service)
     # 1.0-60.0 = seconds to wait before attempting recovery
     recovery_timeout_seconds: 5.0
 

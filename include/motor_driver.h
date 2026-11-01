@@ -4,6 +4,10 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <std_srvs/srv/trigger.hpp>
+
+#include <atomic>
+#include <mutex>
 #include <thread>
 
 class MotorDriver {
@@ -14,8 +18,8 @@ class MotorDriver {
   void onInit(rclcpp::Node::SharedPtr node);
 
   // Getters for commanded velocities (for status publishing)
-  float getM1CommandedVelocityMps() const { return m1_commanded_velocity_mps_; }
-  float getM2CommandedVelocityMps() const { return m2_commanded_velocity_mps_; }
+  float getM1CommandedVelocityMps() const { return m1_commanded_velocity_mps_.load(); }
+  float getM2CommandedVelocityMps() const { return m2_commanded_velocity_mps_.load(); }
   
   // Getter for meters_per_quad_pulse (for status publishing)
   float getMetersPerQuadPulse() const { return meters_per_quad_pulse_; }
@@ -27,7 +31,11 @@ class MotorDriver {
   void logParameters() const;
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
   void mainLoopThread();  // Main periodic loop: reads sensors, checks safety, publishes
-  void watchdogTimerCallback();
+  void checkCommandTimeouts();  // Watchdog stop and coast, called from mainLoopThread
+  void validateParameters() const;
+  void clearFaultCallback(
+      const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   rcl_interfaces::msg::SetParametersResult parametersCallback(
       const std::vector<rclcpp::Parameter> &parameters);
 
@@ -38,6 +46,7 @@ class MotorDriver {
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   std::thread main_loop_thread_;
   rclcpp::Node::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_fault_service_;
 
   int accel_quad_pulses_per_second_;
   int baud_rate_;
@@ -72,13 +81,17 @@ class MotorDriver {
   float recovery_timeout_seconds_;       // For auto-recovery from over-current
 
   // Track commanded velocities for debugging/monitoring
-  float m1_commanded_velocity_mps_;  // meters per second
-  float m2_commanded_velocity_mps_;  // meters per second
+  std::atomic<float> m1_commanded_velocity_mps_;  // meters per second
+  std::atomic<float> m2_commanded_velocity_mps_;  // meters per second
 
-  // Coast timeout tracking
+  // cmd_vel timing, shared between cmdVelCallback (executor thread) and
+  // mainLoopThread. Guarded by cmd_state_mutex_, along with
+  // max_seconds_uncommanded_travel_ and coast_timeout_seconds_.
+  std::mutex cmd_state_mutex_;
   float coast_timeout_seconds_;       // Time without cmd_vel before coasting (0.0=disabled)
   rclcpp::Time last_cmd_vel_time_;    // Time of last cmd_vel message received
   bool is_coasting_;                  // True when motors are in coast mode
+  bool moving_;                       // True when the last command was non-zero
 
   static MotorDriver *g_singleton;
 };

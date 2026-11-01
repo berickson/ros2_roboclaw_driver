@@ -3,6 +3,7 @@
 #include <rcutils/logging_macros.h>
 #include <sys/types.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdarg>  // Include cstdarg for va_list
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <sstream>
 #include <string>
 
+#include "drive_logic.h"
 #include "ros2_roboclaw_driver/srv/reset_encoders.hpp"
 
 /* The expected client is motor_driver.cpp
@@ -221,7 +223,7 @@ class RoboClaw {
   } TMotorCurrents;
 
   // Make sure you call getMotorCurrents before getMotorAlarms.
-  int getMotorAlarms() { return motorAlarms_; }
+  int getMotorAlarms() { return motorAlarms_.load(); }
 
   // Get the value of currents flowig  into each motors.
   TMotorCurrents getMotorCurrents();
@@ -275,36 +277,45 @@ class RoboClaw {
   void notifyCmdVel(bool is_zero);
 
   // Get current protection state (for debugging/monitoring)
-  OverCurrentState getCurrentProtectionState() const { return current_protection_state_; }
+  OverCurrentState getCurrentProtectionState() const { return current_protection_state_.load(); }
+
+  // Clear a latched over-current fault (for the clear_fault service)
+  void clearCurrentFault();
 
   // Get connection state
-  ConnectionState getConnectionState() const { return connection_state_; }
+  ConnectionState getConnectionState() const { return connection_state_.load(); }
 
   // Get smoothed motor currents (filtered over filter_window_seconds)
-  float getM1CurrentSmoothed() const { return m1_current_average_; }
-  float getM2CurrentSmoothed() const { return m2_current_average_; }
+  float getM1CurrentSmoothed() const { return m1_current_average_.load(); }
+  float getM2CurrentSmoothed() const { return m2_current_average_.load(); }
 
   // Get communication statistics
-  uint32_t getConsecutiveErrors() const { return consecutive_errors_; }
-  uint32_t getTotalMessages() const { return total_messages_; }
-  uint32_t getTotalErrors() const { return total_errors_; }
+  uint32_t getConsecutiveErrors() const { return consecutive_errors_.load(); }
+  uint32_t getTotalMessages() const { return total_messages_.load(); }
+  uint32_t getTotalErrors() const { return total_errors_.load(); }
   std::chrono::steady_clock::time_point getLastSuccessfulCommunication() const { 
+    std::lock_guard<std::mutex> lock(state_mutex_);
     return last_successful_communication_; 
   }
 
-  // Get error statistics
-  const ErrorStats& getErrorStats() const { return error_stats_; }
+  // Get error statistics (a copy, since other threads update it)
+  ErrorStats getErrorStats() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return error_stats_;
+  }
 
   // Get firmware version (cached, doesn't trigger command)
   std::string getCachedFirmwareVersion() const;
 
   // Get time since last non-zero cmd_vel (for recovery monitoring)
   std::chrono::steady_clock::time_point getLastNonzeroCmdVelTime() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     return last_nonzero_cmd_vel_time_;
   }
 
   // Get sensor timing information
   std::chrono::system_clock::time_point getLastSensorReadTime() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     return g_sensor_value_group_.last_sensor_read_time_;
   }
 
@@ -319,8 +330,8 @@ class RoboClaw {
 
   // Set current limits (for runtime parameter changes)
   void setMaxCurrents(float m1_max, float m2_max) { 
-    maxM1Current_ = m1_max; 
-    maxM2Current_ = m2_max;
+    maxM1Current_.store(m1_max);
+    maxM2Current_.store(m2_max);
     RCUTILS_LOG_INFO("[RoboClaw::setMaxCurrents] Updated limits: M1=%.2fA, M2=%.2fA", 
                      m1_max, m2_max);
   }
@@ -335,10 +346,16 @@ class RoboClaw {
 
  private:
   // True => print debug messages.
-  bool do_debug_;
+  std::atomic<bool> do_debug_;
 
   // True => print byte values as they are read and written.
-  bool do_low_level_debug_;
+  std::atomic<bool> do_low_level_debug_;
+
+  // Guards state shared between the executor thread (cmd_vel, parameters,
+  // diagnostics) and the main loop thread: g_sensor_value_group_,
+  // error_stats_, the communication and cmd_vel timestamps, and protection
+  // state transitions. Lock order: buffered_command_mutex_ before this.
+  mutable std::mutex state_mutex_;
 
   // Get RoboClaw error status as a string.
   std::string getErrorString(uint32_t errorStatus);
@@ -434,35 +451,35 @@ class RoboClaw {
   int device_port_;          // Unix file descriptor for RoboClaw connection.
   int maxCommandRetries_;    // Maximum number of times to retry a RoboClaw
                              // command.
-  float maxM1Current_;       // Maximum allowed M1 current.
-  float maxM2Current_;       // Maximum allowed M2 current.
-  int motorAlarms_;          // Motors alarms. Bit-wise OR of contributors.
+  std::atomic<float> maxM1Current_;  // Maximum allowed M1 current.
+  std::atomic<float> maxM2Current_;  // Maximum allowed M2 current.
+  std::atomic<int> motorAlarms_{0};  // Motors alarms. Bit-wise OR of contributors.
   std::string device_name_;  // Device name of RoboClaw device.
   int portAddress_;          // Port number of RoboClaw device under control
 
   // Current protection state machine and configuration
-  OverCurrentState current_protection_state_;
+  std::atomic<OverCurrentState> current_protection_state_;
   std::chrono::steady_clock::time_point alarm_triggered_time_;
   std::chrono::steady_clock::time_point recovery_start_time_;
   std::chrono::steady_clock::time_point last_nonzero_cmd_vel_time_;
   float filter_window_seconds_;       // 0.0 = disabled, use instantaneous
-  float recovery_timeout_seconds_;    // 0.0 = disabled, no auto-recovery
+  std::atomic<float> recovery_timeout_seconds_;  // 0.0 = disabled, no auto-recovery
   float sensor_update_rate_;          // For buffer size calculation
   
   // Current averaging buffers
   std::deque<float> m1_current_history_;
   std::deque<float> m2_current_history_;
-  float m1_current_average_;
-  float m2_current_average_;
+  std::atomic<float> m1_current_average_;
+  std::atomic<float> m2_current_average_;
   size_t max_buffer_size_;
   
   // Connection state management
-  ConnectionState connection_state_;
-  uint32_t consecutive_errors_;
+  std::atomic<ConnectionState> connection_state_;
+  std::atomic<uint32_t> consecutive_errors_;
   uint32_t error_threshold_;  // errors before marking disconnected
   std::chrono::steady_clock::time_point last_successful_communication_;
-  uint32_t total_messages_;   // Lifetime count of all commands sent
-  uint32_t total_errors_;     // Lifetime count of all failed commands
+  std::atomic<uint32_t> total_messages_;   // Lifetime count of all commands sent
+  std::atomic<uint32_t> total_errors_;     // Lifetime count of all failed commands
   std::string cached_firmware_version_;  // Firmware version cached at startup
 
   // Last settings sent to the device, re-sent after a reconnect in case the
@@ -481,6 +498,7 @@ class RoboClaw {
   void updateBufferSize();
   float calculateAverage(const std::deque<float>& history) const;
   void transitionState(OverCurrentState new_state, const char* reason);
+  void classifyError(const TRoboClawException& e);  // Caller holds state_mutex_
 
   // Methods for connection state management
   void setConnectionState(ConnectionState new_state, const char* reason);
@@ -585,6 +603,11 @@ class RoboClaw {
   friend class CmdSetEncoderValue;
   friend class CmdSetPid;
   friend class CmdSetSerialTimeout;
+
+  static_assert(NORMAL == static_cast<int>(drive_logic::kNormal) &&
+                OVER_CURRENT_WARNING == static_cast<int>(drive_logic::kOverCurrentWarning) &&
+                RECOVERY_WAITING == static_cast<int>(drive_logic::kRecoveryWaiting),
+                "OverCurrentState must match drive_logic::ProtectionState");
 
  protected:
   DebugLog debug_log_;

@@ -26,66 +26,57 @@ class CmdReadMotorCurrents : public Cmd {
   
   void process() override {
     // Process current readings and handle over-current (called after mutex released)
-    if (roboclaw_.current_protection_state_ == RoboClaw::NORMAL) {
-      // Check if averaged current exceeds threshold
-      if (roboclaw_.m1_current_average_ > roboclaw_.maxM1Current_) {
-        roboclaw_.motorAlarms_ |= RoboClaw::kM1_OVER_CURRENT_ALARM;
-        RCUTILS_LOG_ERROR(
-            "[RoboClaw::CmdReadMotorCurrents] Motor 1 over current (avg). Max "
-            "allowed: %6.3f, found: %6.3f",
-            roboclaw_.maxM1Current_, roboclaw_.m1_current_average_);
-        // Safe to send stop command here - mutex is released
-        roboclaw_.doMixedSpeedAccel(0, 0, 0);
-        roboclaw_.transitionState(RoboClaw::OVER_CURRENT_WARNING, 
-                                   "M1 average current exceeded");
-      } else if (roboclaw_.m2_current_average_ > roboclaw_.maxM2Current_) {
-        roboclaw_.motorAlarms_ |= RoboClaw::kM2_OVER_CURRENT_ALARM;
-        RCUTILS_LOG_ERROR(
-            "[RoboClaw::CmdReadMotorCurrents] Motor 2 over current (avg). Max "
-            "allowed: %6.3f, found: %6.3f",
-            roboclaw_.maxM2Current_, roboclaw_.m2_current_average_);
-        // Safe to send stop command here - mutex is released
-        roboclaw_.doMixedSpeedAccel(0, 0, 0);
-        roboclaw_.transitionState(RoboClaw::OVER_CURRENT_WARNING, 
-                                   "M2 average current exceeded");
-      } else {
-        // Clear alarm flags when current is normal
-        roboclaw_.motorAlarms_ &= ~(RoboClaw::kM1_OVER_CURRENT_ALARM | 
-                                    RoboClaw::kM2_OVER_CURRENT_ALARM);
-        // Debug: periodically log current vs limits
-        static int log_counter = 0;
-        if (roboclaw_.do_debug_ && (++log_counter % 50) == 0) {
-          RCUTILS_LOG_INFO(
-              "[RoboClaw::CmdReadMotorCurrents] M1: %.2fA/%.2fA, M2: %.2fA/%.2fA",
-              roboclaw_.m1_current_average_, roboclaw_.maxM1Current_,
-              roboclaw_.m2_current_average_, roboclaw_.maxM2Current_);
-        }
+    const float m1_average = roboclaw_.m1_current_average_.load();
+    const float m2_average = roboclaw_.m2_current_average_.load();
+    const float m1_max = roboclaw_.maxM1Current_.load();
+    const float m2_max = roboclaw_.maxM2Current_.load();
+    const bool m1_over = m1_average > m1_max;
+    const bool m2_over = m2_average > m2_max;
+
+    const auto state = static_cast<drive_logic::ProtectionState>(
+        roboclaw_.current_protection_state_.load());
+    const double seconds_since_nonzero_cmd = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - roboclaw_.getLastNonzeroCmdVelTime()).count();
+    const auto next = drive_logic::nextProtectionState(
+        state, m1_over || m2_over, seconds_since_nonzero_cmd,
+        roboclaw_.recovery_timeout_seconds_);
+
+    if (state == drive_logic::kNormal && next == drive_logic::kOverCurrentWarning) {
+      roboclaw_.motorAlarms_ |= m1_over ? RoboClaw::kM1_OVER_CURRENT_ALARM
+                                        : RoboClaw::kM2_OVER_CURRENT_ALARM;
+      RCUTILS_LOG_ERROR(
+          "[RoboClaw::CmdReadMotorCurrents] Motor %d over current (avg). Max "
+          "allowed: %6.3f, found: %6.3f",
+          m1_over ? 1 : 2, m1_over ? m1_max : m2_max,
+          m1_over ? m1_average : m2_average);
+      // Enter the fault state before stopping, so cmd_vel is blocked even if
+      // the stop command fails
+      roboclaw_.transitionState(RoboClaw::OVER_CURRENT_WARNING,
+                                m1_over ? "M1 average current exceeded"
+                                        : "M2 average current exceeded");
+      roboclaw_.doMixedSpeedAccel(0, 0, 0);
+    } else if (state == drive_logic::kNormal) {
+      // Clear alarm flags when current is normal
+      roboclaw_.motorAlarms_ &= ~(RoboClaw::kM1_OVER_CURRENT_ALARM |
+                                  RoboClaw::kM2_OVER_CURRENT_ALARM);
+      // Debug: periodically log current vs limits
+      static int log_counter = 0;
+      if (roboclaw_.do_debug_ && (++log_counter % 50) == 0) {
+        RCUTILS_LOG_INFO(
+            "[RoboClaw::CmdReadMotorCurrents] M1: %.2fA/%.2fA, M2: %.2fA/%.2fA",
+            m1_average, m1_max, m2_average, m2_max);
       }
-    } else if (roboclaw_.current_protection_state_ == RoboClaw::OVER_CURRENT_WARNING) {
-      // Check if we can start recovery (no non-zero cmd_vel for recovery timeout)
-      if (roboclaw_.recovery_timeout_seconds_ > 0.0) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration<float>(now - roboclaw_.last_nonzero_cmd_vel_time_).count();
-        if (elapsed >= roboclaw_.recovery_timeout_seconds_) {
-          roboclaw_.recovery_start_time_ = now;
-          roboclaw_.transitionState(RoboClaw::RECOVERY_WAITING, 
-                                     "no non-zero cmd_vel, starting recovery wait");
-        }
-      }
-    } else if (roboclaw_.current_protection_state_ == RoboClaw::RECOVERY_WAITING) {
-      // Check if we can recover: current is low
-      if (roboclaw_.m1_current_average_ > roboclaw_.maxM1Current_ ||
-          roboclaw_.m2_current_average_ > roboclaw_.maxM2Current_) {
-        RCUTILS_LOG_WARN(
-            "[RoboClaw::CmdReadMotorCurrents] Current still high during recovery wait. "
-            "M1: %6.3f, M2: %6.3f",
-            roboclaw_.m1_current_average_, roboclaw_.m2_current_average_);
-        roboclaw_.transitionState(RoboClaw::OVER_CURRENT_WARNING, 
-                                   "Current still too high");
-      } else {
-        // Current is low, we can transition back to normal
-        roboclaw_.transitionState(RoboClaw::NORMAL, "current normal, recovery complete");
-      }
+    } else if (next == drive_logic::kRecoveryWaiting) {
+      roboclaw_.transitionState(RoboClaw::RECOVERY_WAITING,
+                                "no non-zero cmd_vel, starting recovery wait");
+    } else if (state == drive_logic::kRecoveryWaiting && next == drive_logic::kOverCurrentWarning) {
+      RCUTILS_LOG_WARN(
+          "[RoboClaw::CmdReadMotorCurrents] Current still high during recovery wait. "
+          "M1: %6.3f, M2: %6.3f",
+          m1_average, m2_average);
+      roboclaw_.transitionState(RoboClaw::OVER_CURRENT_WARNING, "Current still too high");
+    } else if (state == drive_logic::kRecoveryWaiting && next == drive_logic::kNormal) {
+      roboclaw_.transitionState(RoboClaw::NORMAL, "current normal, recovery complete");
     }
   }
 
